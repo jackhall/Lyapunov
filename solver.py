@@ -13,7 +13,7 @@ class System:
 
 	@property
 	def state(self):
-		return list(self._state)
+		return self._state
 
 	@state.setter
 	def state(self, x):
@@ -22,7 +22,7 @@ class System:
 		if len(x) != self._num_states:
 			raise RuntimeError(str(type(self)) + ' has ' + str(self._num_states)
 							   + ' states, not ' + str(len(x)) + '.')
-		self._state = list(x)
+		self._state = x
 
 	def __call__(self, signal, disturbance=None):
 		"""Returns state derivatives in a list, as required by vode.
@@ -157,7 +157,7 @@ class Solver:
 				interval.lower = interval.midpoint
 			else:
 				interval.upper = interval.midpoint
-				self.system.revert()
+				self.stepper.revert()
 		else:
 			self.stepper.step(interval.length) #step across the boundary
 
@@ -197,7 +197,7 @@ class Solver:
 			#Record for output.
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
-		self.stepper.state, self.stepper.time = self.x_out[0], self.t_out[0]
+		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 		if self._autonomous:
 		 	del self.system.time
 		try:
@@ -212,9 +212,9 @@ class Solver:
 		assert hasattr(self.system, 'output')
 		self.y_out = []
 		for x, t in zip(self.x_out, self.t_out):
-			self.stepper.state, self.stepper.time = x, t
+			self.system.state, self.system.time = x, t
 			self.y_out.append(self.system.output)
-		self.stepper.state, self.stepper.time = self.x_out[0], self.t_out[0]
+		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 		return numpy.array(self.y_out)
 
 	
