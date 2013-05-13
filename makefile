@@ -1,9 +1,9 @@
 CC = g++
-CFLAGS = -std=c++11
-LFLAGS = -shared -Wl,-no-undefined
+CFLAGS = -std=c++11 -g
+LFLAGS = -shared -Wl,-no-undefined -g
 PFLAGS = -lpython2.7 -lboost_python -lboost_system
 
-lyapunov.so : lyapunov.cpp
+lyapunov.so : lyapunov.cpp cash_karp.h
 	$(CC) $(CFLAGS) $(PATHS) -fPIC -I/usr/include/python2.7 -o lyapunov.o -c lyapunov.cpp
 	$(CC) $(LFLAGS) $(PFLAGS) -o lyapunov.so lyapunov.o
 	rm *.o
