@@ -1,12 +1,11 @@
 import numpy
 import matplotlib.pyplot as plt
-import scipy.integrate as integrate
-
+import lyapunov
 
 class System:
 	"""A state machine archetype representing a dynamic system."""
 	def __init__(self, state0):
-		self.state = list(state0)
+		self.state = state0
 		self._num_states = len(state0)
 
 	def __len__(self):
@@ -14,7 +13,7 @@ class System:
 
 	@property
 	def state(self):
-		return self._state
+		return list(self._state)
 
 	@state.setter
 	def state(self, x):
@@ -101,10 +100,10 @@ class ReferenceFilter(System):
 
 
 
-def ode_func(time, state, system):
-	system.state = state
-	system.time = time
-	return system()
+#def ode_func(time, state, system):
+#	system.state = state
+#	system.time = time
+#	return system()
 
 
 class TimeInterval:
@@ -120,8 +119,9 @@ class TimeInterval:
 
 
 class Solver:
-	def __init__(self, system, events=False): #pass in ode options too?
+	def __init__(self, system, events=False, min_ratio=0.001): #pass in ode options too?
 		self.system = system
+		self.stepper = lyapunov.Stepper(system)
 		#Check basic requirements of a system object...
 		assert hasattr(system, 'state') 	#for setting state
 		try: 
@@ -130,83 +130,76 @@ class Solver:
 			raise TypeError('system must be callable without arguments')
 		self.events = events is True
 		self._autonomous = not hasattr(system, 'time') 
-		if self._autonomous:
-			system.time = 0.0 #means that system.time is reserved!
-		self.stepper = integrate.ode(ode_func)
-		self.stepper.set_integrator('vode') #change to 'lsoda' after debug
-		self.stepper.set_initial_value(system.state, system.time)
-		self.stepper.set_f_params(self.system)
 		self.num_points = 100 #number of points recorded/plotted
+		self.min_ratio = min_ratio
 
-	def _take_euler_step(self, step_size):
-		xdot = self.system()
-		self.system.state = [x + Dx*step_size for (x,Dx) 
-							 in zip(self.system.state, xdot)]
-		self.system.time += step_size
+	@property
+	def min_ratio(self):
+		return self._min_step_ratio
 
-	def _find_root(self, old_time, old_state):
+	@min_ratio.setter
+	def min_ratio(self, new_min_ratio):
+		if new_min_ratio > 1:
+			self._min_step_ratio = 1.0 / min_ratio
+		else:
+			self._min_step_ratio = new_min_ratio
+
+	def _find_root(self):
 		"""A bisection rootfinder."""
-		interval = TimeInterval(old_time, self.system.time)
-		min_step_size = interval.length / 1000.0 #this is a little arbitrary
-		self.system.state, self.system.time = old_state, old_time
+		interval = TimeInterval(self.system.time - self.stepper.step_size, 
+								self.system.time)
+		min_step_size = interval.length * self.min_ratio 
+		self.stepper.revert() #take one step backwards
 		old_mode = self.system.mode
-		safe_state = list(old_state)
 		while interval.length > min_step_size:
-			self._take_euler_step(interval.length / 2.0)
+			self.stepper.step(interval.length / 2.0)
 			if self.system.mode == old_mode:
 				interval.lower = interval.midpoint
-				safe_state = list(self.system.state)
 			else:
 				interval.upper = interval.midpoint
-				self.system.state = safe_state
-				self.system.time = interval.lower
+				self.system.revert()
 		else:
-			self._take_euler_step(interval.length) #step across the boundary
-		self.stepper.set_initial_value(self.system.state, self.system.time)
+			self.stepper.step(interval.length) #step across the boundary
 
 	def _slide(self, step_size, final_time):
-		#How to control step size? Use step_size input as a maximum?
-		self._take_euler_step(step_size)
+		min_step_size = step_size * self.min_ratio
+		self.stepper.step(min_step_size)
 		old_mode = self.system.mode
-		self._take_euler_step(step_size)
+		self.stepper.step(min_step_size)
 		while self.system.mode != old_mode and self.system.time < final_time:
 			old_mode = self.system.mode
-			self._take_euler_step(step_size)
+			self.stepper.step(min_step_size)
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
 		return self.system.time >= final_time
 
 	def simulate(self, final_time):
-		step_size = (final_time - self.stepper.t) / self.num_points
-		self.x_out = [self.stepper.y]
-		self.t_out = [self.stepper.t]
-		if self.events:
+		if self._autonomous:
+			self.system.time = 0.0 #means that system.time is reserved!
+		step_size = (final_time - self.system.time) / self.num_points
+		self.x_out = [self.system.state]
+		self.t_out = [self.system.time]
+		if self.events is True:
 			current_mode = self.system.mode
 		#main solver loop
-		while self.stepper.t < final_time and self.stepper.successful():
-			#Detect an event - defined as a change in system.mode.
+		while self.system.time < final_time:
+			self.stepper.step(step_size)
 			if self.events is True:
-				self.system.state = self.stepper.y
-				self.system.time = self.stepper.t
-				#Take an euler step first to test for a boundary crossing.
+				#Detect an event - defined as a change in system.mode.
 				#Currently assumes only two modes!
-				self._take_euler_step(step_size) 
 				if self.system.mode != current_mode:
-					self._find_root(self.t_out[-1], self.x_out[-1])
+					self._find_root()
 					current_mode = self.system.mode
-					self._take_euler_step(step_size)
+					self.stepper.step(step_size)
 					if self.system.mode != current_mode:
+						self.stepper.revert()
 						if self._slide(step_size, final_time): break
-						
-			self.stepper.integrate(self.stepper.t + step_size)
 			#Record for output.
-			self.x_out.append(self.stepper.y)
-			self.t_out.append(self.stepper.t)
-		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
+			self.x_out.append(self.system.state)
+			self.t_out.append(self.system.time)
+		self.stepper.state, self.stepper.time = self.x_out[0], self.t_out[0]
 		if self._autonomous:
 		 	del self.system.time
-		if not self.stepper.successful():
-			raise RuntimeError('Solver error!')
 		try:
 			self.compute_output()
 			return (numpy.array(self.x_out), 
@@ -219,9 +212,9 @@ class Solver:
 		assert hasattr(self.system, 'output')
 		self.y_out = []
 		for x, t in zip(self.x_out, self.t_out):
-			self.system.state, self.system.time = x, t
+			self.stepper.state, self.stepper.time = x, t
 			self.y_out.append(self.system.output)
-		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
+		self.stepper.state, self.stepper.time = self.x_out[0], self.t_out[0]
 		return numpy.array(self.y_out)
 
 	

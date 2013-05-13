@@ -3,9 +3,9 @@ CFLAGS = -std=c++11
 LFLAGS = -shared -Wl,-no-undefined
 PFLAGS = -lpython2.7 -lboost_python -lboost_system
 
-stepper.so : stepper.cpp
-	$(CC) $(CFLAGS) $(PATHS) -fPIC -I/usr/include/python2.7 -o stepper.o -c stepper.cpp
-	$(CC) $(LFLAGS) $(PFLAGS) -o stepper.so stepper.o
+lyapunov.so : lyapunov.cpp
+	$(CC) $(CFLAGS) $(PATHS) -fPIC -I/usr/include/python2.7 -o lyapunov.o -c lyapunov.cpp
+	$(CC) $(LFLAGS) $(PFLAGS) -o lyapunov.so lyapunov.o
 	rm *.o
 
 #build/libbenoit.so : build/IndexBase.o
