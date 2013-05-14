@@ -62,6 +62,7 @@ class Stepper {
 	unsigned int num_states;
 	double previous_time;
 	std::vector<double> previous_state, previous_error, current_error;
+	std::vector<double> k1, k2, k3, k4, k5, k6;
 
 	/*void scale(std::vector<double>& x, double factor) {
 		//multiply each element in x by factor
@@ -92,11 +93,14 @@ public:
 	Stepper() = delete;
 	Stepper(boost::python::object sys) : system(sys), saved(false), 
 		num_states( len(system) ), previous_time(0), previous_state(num_states),
-		previous_error(num_states), current_error(num_states, 0.0) {} 
+		previous_error(num_states), current_error(num_states, 0.0),
+   		k1(num_states), k2(num_states), k3(num_states), k4(num_states),
+		k5(num_states), k6(num_states) {} 
 	Stepper(const Stepper& rhs) : system(rhs.system), saved(rhs.saved), 
 		previous_time(rhs.previous_time), previous_state(rhs.previous_state),
 		previous_error(rhs.previous_error), current_error(rhs.current_error),
-   		num_states(rhs.num_states) {}
+   		num_states(rhs.num_states), k1(num_states), k2(num_states), 
+		k3(num_states), k4(num_states), k5(num_states), k6(num_states) {}
 	Stepper& operator=(const Stepper& rhs) {
 		if(this != &rhs) {
 			system = boost::python::object(rhs.system);
@@ -112,6 +116,9 @@ public:
 
 	boost::python::object get_system() const { return system; }
 	void set_system(boost::python::object new_system) { system = new_system; }
+	//void find_root(double h, double h_min) {
+	//	
+	//}
 	void step(double h) {
 		using namespace boost::python;
 		//h is the step size
@@ -121,19 +128,19 @@ public:
 		double t = extract<double>(system.attr("time"));
 
 		//first slope
-		auto k1 = list_to_vector( extract<list>(system()) );
+		list_to_vector(k1, extract<list>(system()));
 
 		//second slope
 		scale_and_add(state, k1, h*a<2>(1));
 		system.attr("time") = t + c[1]*h;
-		auto k2 = list_to_vector( extract<list>(system()) );
+		list_to_vector(k2, extract<list>(system()));
 
 		//third slope
 		vector_to_list(state, previous_state);
 		scale_and_add(state, k1, h*a<3>(1));
 		scale_and_add(state, k2, h*a<3>(2));
 		system.attr("time") = t + c[2]*h;
-		auto k3 = list_to_vector( extract<list>(system()) );
+		list_to_vector(k3, extract<list>(system()));
 
 		//fourth slope
 		vector_to_list(state, previous_state);
@@ -141,7 +148,7 @@ public:
 		scale_and_add(state, k2, h*a<4>(2));
 		scale_and_add(state, k3, h*a<4>(3));
 		system.attr("time") = t + c[3]*h;
-		auto k4 = list_to_vector( extract<list>(system()) );
+		list_to_vector(k4, extract<list>(system()));
 
 		//fifth slope
 		vector_to_list(state, previous_state);
@@ -150,7 +157,7 @@ public:
 		scale_and_add(state, k3, h*a<5>(3));
 		scale_and_add(state, k4, h*a<5>(4));
 		system.attr("time") = t + c[4]*h;
-		auto k5 = list_to_vector( extract<list>(system()) );
+		list_to_vector(k5, extract<list>(system()));
 
 		//sixth slope
 		vector_to_list(state, previous_state);
@@ -160,7 +167,7 @@ public:
 		scale_and_add(state, k4, h*a<6>(4));
 		scale_and_add(state, k5, h*a<6>(5));
 		system.attr("time") = t + c[5]*h;
-		auto k6 = list_to_vector( extract<list>(system()) );
+		list_to_vector(k6, extract<list>(system()));
 
 		//state update
 		vector_to_list(state, previous_state);
@@ -173,7 +180,7 @@ public:
 		system.attr("time") = t + h;
 
 		//error update
-		for(auto& x : current_error) x = 0.0;
+		current_error = previous_state;
 		scale_and_add(current_error, k1, h*b4[0]);
 		scale_and_add(current_error, k2, h*b4[1]);
 		scale_and_add(current_error, k3, h*b4[2]);
@@ -188,20 +195,14 @@ public:
 		//flag prior state/error as saved
 		saved = true;
 	}
-	void list_to_vector(std::vector<double>& y, boost::python::list& x) const {
+	void list_to_vector(std::vector<double>& y, boost::python::list x) const {
 		for(unsigned int i=0; i<num_states; ++i) 
 			y[i] = boost::python::extract<double>(x[i]);
-	}
-	std::vector<double> list_to_vector(boost::python::list x) const {
-		std::vector<double> result(num_states);
-		list_to_vector(result, x);
-		return result;
 	}
 	void vector_to_list(boost::python::list y, std::vector<double> x) {
 		for(unsigned int i=0; i<num_states; ++i)
 			y[i] = x[i];
 	}
-
 	void euler_step(double h) {
 		using namespace boost::python;
 		//h is the step size
@@ -210,14 +211,13 @@ public:
 		std::swap(previous_error, current_error);
 		double t = extract<double>(system.attr("time"));
 
-		auto xdot = list_to_vector( extract<list>(system()) );
+		list_to_vector(k1, extract<list>(system()));
 
 		for(unsigned int i=0; i<num_states; ++i) 
-			state[i] += xdot[i] * h;
+			state[i] += k1[i] * h;
 		system.attr("time") = t + h;
 		saved = true;
 	}
-
 	bool revert() {
 		using namespace boost::python;
 		if(!saved) return false;
@@ -228,13 +228,6 @@ public:
 		saved = false;
 		return true;
 	}
-
-	/*void reset_saved() {
-		using namespace boost::python;
-		saved = false;
-		for(auto& x : current_error) x = 0.0; 
-	}*/
-
 	void save() {
 		using namespace boost::python;
 		previous_error = current_error;

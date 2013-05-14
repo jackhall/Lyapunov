@@ -26,7 +26,7 @@ BOOST_PYTHON_MODULE(lyapunov) {
 
 	class_<Stepper>("Stepper", init<object>())
 		.def("step", &Stepper::step)
-		//.def("euler_step", &Stepper::euler_step)
+		.def("euler_step", &Stepper::euler_step)
 		.def("revert", &Stepper::revert)
 		.def("save", &Stepper::save)
 		.def("__len__", &Stepper::get_num_states)

@@ -1,3 +1,4 @@
+import math
 import numpy
 import matplotlib.pyplot as plt
 import lyapunov
@@ -70,7 +71,8 @@ class DemoEvents(System):
 		try:
 			xmin, xmax = min(self.x_out[:,0]), max(self.x_out[:,0])
 			ymin, ymax = min(self.x_out[:,1]), max(self.x_out[:,1])
-			x, lam = numpy.array([xmin, xmax]), numpy.array([ymin, ymax])
+			x = numpy.array([xmin, xmax])
+			lam = numpy.array([-0.5*xmin, -0.5*xmax])
 			plt.plot(x, lam)
 			plt.plot(self.x_out[:,0], self.x_out[:,1])
 			plt.show()
@@ -118,8 +120,15 @@ class TimeInterval:
 		return (self.upper + self.lower) / 2.0
 
 
+def norm(x):
+	result = 0.0
+	for i in x:
+		result += i**2
+	return math.sqrt(result)
+
+
 class Solver:
-	def __init__(self, system, events=False, min_ratio=0.001): #pass in ode options too?
+	def __init__(self, system, events=False, slide=True, min_ratio=.01): 
 		self.system = system
 		self.stepper = lyapunov.Stepper(system)
 		#Check basic requirements of a system object...
@@ -129,6 +138,7 @@ class Solver:
 		except: 
 			raise TypeError('system must be callable without arguments')
 		self.events = events is True
+		self.slide = slide is True
 		self._autonomous = not hasattr(system, 'time') 
 		self.num_points = 100 #number of points recorded/plotted
 		self.min_ratio = min_ratio
@@ -144,22 +154,27 @@ class Solver:
 		else:
 			self._min_step_ratio = new_min_ratio
 
-	def _find_root(self):
+	def _find_root(self, step_size):
 		"""A bisection rootfinder."""
-		interval = TimeInterval(self.system.time - self.stepper.step_size, 
+		interval = TimeInterval(self.system.time - step_size, 
 								self.system.time)
 		min_step_size = interval.length * self.min_ratio 
+		end_x, end_t = list(self.system.state), self.system.time
 		self.stepper.revert() #take one step backwards
 		old_mode = self.system.mode
-		while interval.length > min_step_size:
+		while interval.length > min_step_size: #and norm(self.system.state) > 0.1:
+			#print (interval.lower, interval.upper)
 			self.stepper.step(interval.length / 2.0)
+			assert interval.length > min_step_size*0.1
 			if self.system.mode == old_mode:
 				interval.lower = interval.midpoint
 			else:
 				interval.upper = interval.midpoint
+				end_x, end_t = list(self.system.state), self.system.time
 				self.stepper.revert()
-		else:
-			self.stepper.step(interval.length) #step across the boundary
+		if self.system.mode == old_mode:
+			self.system.state, self.system.time = end_x, end_t
+		
 
 	def _slide(self, step_size, final_time):
 		min_step_size = step_size * self.min_ratio
@@ -168,7 +183,7 @@ class Solver:
 		self.stepper.step(min_step_size)
 		while self.system.mode != old_mode and self.system.time < final_time:
 			old_mode = self.system.mode
-			self.stepper.step(min_step_size)
+			self.stepper.euler_step(min_step_size)
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
 		return self.system.time >= final_time
@@ -177,7 +192,7 @@ class Solver:
 		if self._autonomous:
 			self.system.time = 0.0 #means that system.time is reserved!
 		step_size = (final_time - self.system.time) / self.num_points
-		self.x_out = [self.system.state]
+		self.x_out = [list(self.system.state)]
 		self.t_out = [self.system.time]
 		if self.events is True:
 			current_mode = self.system.mode
@@ -188,14 +203,15 @@ class Solver:
 				#Detect an event - defined as a change in system.mode.
 				#Currently assumes only two modes!
 				if self.system.mode != current_mode:
-					self._find_root()
+					self._find_root(step_size)
 					current_mode = self.system.mode
-					self.stepper.step(step_size)
-					if self.system.mode != current_mode:
-						self.stepper.revert()
-						if self._slide(step_size, final_time): break
+					if self.slide is True:
+						self.stepper.step(step_size)
+						if self.system.mode != current_mode:
+							self.stepper.revert()
+							if self._slide(step_size, final_time): break
 			#Record for output.
-			self.x_out.append(self.system.state)
+			self.x_out.append(list(self.system.state))
 			self.t_out.append(self.system.time)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 		if self._autonomous:
@@ -213,7 +229,7 @@ class Solver:
 		self.y_out = []
 		for x, t in zip(self.x_out, self.t_out):
 			self.system.state, self.system.time = x, t
-			self.y_out.append(self.system.output)
+			self.y_out.append(list(self.system.output))
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 		return numpy.array(self.y_out)
 
