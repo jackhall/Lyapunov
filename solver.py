@@ -59,11 +59,11 @@ class DemoEvents(System):
 	@property
 	def mode(self):
 		x, v = self.state
-		return v < -0.5*x
+		return 'a' if v < -0.5*x else 'b'
 
 	def __call__(self):
 		x, v = self.state
-		u = 1 if self.mode else -1
+		u = 1 if self.mode == 'a' else -1
 		return [v, u]
 
 	def plot(self):
@@ -162,7 +162,7 @@ class Solver:
 		end_x, end_t = list(self.system.state), self.system.time
 		self.stepper.revert() #take one step backwards
 		old_mode = self.system.mode
-		while interval.length > min_step_size: #and norm(self.system.state) > 0.1:
+		while interval.length > min_step_size: 
 			#print (interval.lower, interval.upper)
 			self.stepper.step(interval.length / 2.0)
 			assert interval.length > min_step_size*0.1
@@ -195,15 +195,18 @@ class Solver:
 		self.x_out = [list(self.system.state)]
 		self.t_out = [self.system.time]
 		if self.events is True:
-			current_mode = self.system.mode
+			current_mode = self.system.mode #assumes immutable type!
 		#main solver loop
 		while self.system.time < final_time:
 			self.stepper.step(step_size)
 			if self.events is True:
 				#Detect an event - defined as a change in system.mode.
-				#Currently assumes only two modes!
 				if self.system.mode != current_mode:
 					self._find_root(step_size)
+					#C++ version drafted but still buggy
+					#self.stepper.find_root(step_size, 
+					#					   step_size*self.min_ratio);
+					assert current_mode != self.system.mode
 					current_mode = self.system.mode
 					if self.slide is True:
 						self.stepper.step(step_size)
