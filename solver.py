@@ -68,12 +68,11 @@ class DemoEvents(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
 		self.state = [1.0, 1.0]
-		self.u = 1 if self.mode == 'a' else -1
 	
 	@property
 	def mode(self):
 		x, v = self._state
-		return 'a' if v < -0.5*x else 'b'
+		return 'under' if v < -0.5*x else 'over'
 
 	def __len__(self):
 		return 2
@@ -85,7 +84,7 @@ class DemoEvents(object):
 	@state.setter
 	def state(self, x):
 		self._state = list(x)
-		self.u = 1 if self.mode == 'a' else -1
+		self.u = 1 if self.mode == 'under' else -1
 
 	def __call__(self):
 		_, v = self.state
@@ -153,7 +152,8 @@ def norm(x):
 
 
 class Solver(object):
-	def __init__(self, system, events=False, slide=True, min_ratio=.01): 
+	def __init__(self, system, events=False, slide=True, min_ratio=.01, 
+			     points=100): 
 		self.system = system
 		self.stepper = lyapunov.Stepper(system)
 		#Check basic requirements of a system object...
@@ -165,7 +165,7 @@ class Solver(object):
 		self.events = events is True
 		self.slide = slide is True
 		self._autonomous = not hasattr(system, 'time') 
-		self.num_points = 100 #number of points recorded/plotted
+		self.points = points #number of points recorded/plotted
 		self.min_ratio = min_ratio
 
 	@property
@@ -179,26 +179,26 @@ class Solver(object):
 		else:
 			self._min_step_ratio = new_min_ratio
 
-	def _find_root(self, step_size):
-		"""A bisection rootfinder."""
-		interval = TimeInterval(self.system.time - step_size, 
-								self.system.time)
-		min_step_size = interval.length * self.min_ratio 
-		end_x, end_t = self.system.state, self.system.time
-		self.stepper.revert() #take one step backwards
-		old_mode = str(self.system.mode)
-		while interval.length > min_step_size: 
-			#print (interval.lower, interval.upper)
-			self.stepper.step(interval.length / 2.0)
-			assert interval.length > min_step_size*0.1
-			if self.system.mode == old_mode:
-				interval.lower = interval.midpoint
-			else:
-				interval.upper = interval.midpoint
-				end_x, end_t = self.system.state, self.system.time
-				self.stepper.revert()
-		if self.system.mode == old_mode:
-			self.system.state, self.system.time = end_x, end_t
+	#def _find_root(self, step_size):
+	#	"""A bisection rootfinder."""
+	#	interval = TimeInterval(self.system.time - step_size, 
+	#							self.system.time)
+	#	min_step_size = interval.length * self.min_ratio 
+	#	end_x, end_t = self.system.state, self.system.time
+	#	self.stepper.revert() #take one step backwards
+	#	old_mode = str(self.system.mode)
+	#	while interval.length > min_step_size: 
+	#		#print (interval.lower, interval.upper)
+	#		self.stepper.step(interval.length / 2.0)
+	#		assert interval.length > min_step_size*0.1
+	#		if self.system.mode == old_mode:
+	#			interval.lower = interval.midpoint
+	#		else:
+	#			interval.upper = interval.midpoint
+	#			end_x, end_t = self.system.state, self.system.time
+	#			self.stepper.revert()
+	#	if self.system.mode == old_mode:
+	#		self.system.state, self.system.time = end_x, end_t
 		
 
 	def _slide(self, step_size, final_time):
@@ -206,9 +206,13 @@ class Solver(object):
 		self.stepper.step(min_step_size)
 		old_mode = str(self.system.mode)
 		self.stepper.step(min_step_size)
+		#somehow the solver gets stuck in this loop for small step sizes
 		while self.system.mode != old_mode and self.system.time < final_time:
 			old_mode = str(self.system.mode)
 			self.stepper.euler_step(min_step_size)
+			if self.system.mode == old_mode:
+				self.stepper.revert()
+				self.stepper.euler_step(step_size)
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
 		return self.system.time >= final_time
@@ -216,9 +220,10 @@ class Solver(object):
 	def simulate(self, final_time):
 		if self._autonomous:
 			self.system.time = 0.0 #means that system.time is reserved!
-		step_size = (final_time - self.system.time) / self.num_points
+		step_size = (final_time - self.system.time) / self.points
 		self.x_out = [list(self.system.state)]
 		self.t_out = [self.system.time]
+		root_count = 0
 		if self.events is True:
 			current_mode = str(self.system.mode) #assumes string type!
 		#main solver loop
@@ -233,7 +238,12 @@ class Solver(object):
 										   step_size*self.min_ratio);
 					assert current_mode != self.system.mode
 					current_mode = str(self.system.mode)
+					root_count += 1 
+					if root_count > 50:
+						raise RuntimeError("Rootfinder called 50 times.")
 					if self.slide is True:
+						self.x_out.append(list(self.system.state))
+						self.t_out.append(self.system.time)
 						self.stepper.step(step_size)
 						if self.system.mode != current_mode:
 							self.stepper.revert()
@@ -242,6 +252,7 @@ class Solver(object):
 			self.x_out.append(list(self.system.state))
 			self.t_out.append(self.system.time)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
+		print "Rootfinder was called", root_count, "times."
 		if self._autonomous:
 		 	del self.system.time
 		try:

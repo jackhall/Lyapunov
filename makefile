@@ -8,6 +8,11 @@ lyapunov.so : lyapunov.cpp cash_karp.h
 	$(CC) $(LFLAGS) $(PFLAGS) -o lyapunov.so lyapunov.o
 	rm *.o
 
+install :
+	sudo cp lyapunov.so /usr/lib64/python2.7/site-packages/.
+	sudo cp solver.py /usr/lib64/python2.7/site-packages/.
+
+
 #build/libbenoit.so : build/IndexBase.o
 #	$(CC) $(LFLAGS) -lboost_system -Wl,-soname,libbenoit.so.1 -o build/libbenoit.so.1.0 build/IndexBase.o; \
 	cd build; \

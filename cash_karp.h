@@ -117,17 +117,17 @@ namespace lyapunov {
 		}
 		~Stepper() = default;
 		
-		void write_state(std::vector<double>& new_state) {
-			using namespace boost::python;
-			if(state_is_property) {
-				list state_list;
-				for(auto x : new_state) state_list.append(x);
-				system.attr("state").attr("__set__")(state_list);
-			} else {
-				list state_list = extract<list>(system.attr("state"));
-				vector_to_list(state_list, new_state);
-			}
-		}
+		//void write_state(std::vector<double>& new_state) {
+		//	using namespace boost::python;
+		//	if(state_is_property) {
+		//		list state_list;
+		//		for(auto x : new_state) state_list.append(x);
+		//		system.attr("state").attr("__set__")(state_list);
+		//	} else {
+		//		list state_list = extract<list>(system.attr("state"));
+		//		vector_to_list(state_list, new_state);
+		//	}
+		//}
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { 
 			system = new_system; 
@@ -270,13 +270,14 @@ namespace lyapunov {
 			list state = extract<list>(system.attr("state"));
 			list_to_vector(previous_state, state);
 			std::swap(previous_error, current_error);
-			double t = extract<double>(system.attr("time"));
+			double previous_time = extract<double>(system.attr("time"));
 
 			list_to_vector(k1, extract<list>(system()));
 
 			for(unsigned int i=0; i<num_states; ++i) 
 				state[i] += k1[i] * h;
-			system.attr("time") = t + h;
+			system.attr("state") = state;
+			system.attr("time") = previous_time + h;
 			saved = true;
 		}
 		bool revert() {
