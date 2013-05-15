@@ -66,27 +66,12 @@ namespace lyapunov {
 
 
 	class Stepper {
-		boost::python::object system;
-		bool saved;
+		boost::python::object system, state_attr;
+		bool saved, state_is_property;
 		unsigned int num_states;
 		double previous_time;
 		std::vector<double> previous_state, previous_error, current_error;
 		std::vector<double> k1, k2, k3, k4, k5, k6;
-
-		/*void scale(std::vector<double>& x, double factor) {
-			//multiply each element in x by factor
-			for(auto& i : x)
-				i += factor;
-		}
-		
-		void scale_and_add(list& x, const list& y, double factor) {
-			//multiply each element in y by factor and add it to the
-			//corresponding element in x
-			using namespace boost::python;
-			if(len(x) != len(y) or len(x) != num_states) LengthError();
-			for(unsigned int i=0; i<num_states; ++i)
-				x[i] += extract<double>(y[i]) * factor;
-		}*/
 
 		void scale_and_add(boost::python::list& x, 
 						   const std::vector<double>& y, double factor) {
@@ -97,22 +82,23 @@ namespace lyapunov {
 			for(unsigned int i=0; i<num_states; ++i) x[i] += y[i] * factor;
 		}
 
-
 	public:
 		Stepper() = delete;
-		Stepper(boost::python::object sys) : system(sys), saved(false), 
-			num_states( len(system) ), previous_time(0), previous_state(num_states),
-			previous_error(num_states), current_error(num_states, 0.0),
-			k1(num_states), k2(num_states), k3(num_states), k4(num_states),
-			k5(num_states), k6(num_states) {} 
-		Stepper(const Stepper& rhs) : system(rhs.system), saved(rhs.saved), 
-			previous_time(rhs.previous_time), previous_state(rhs.previous_state),
-			previous_error(rhs.previous_error), current_error(rhs.current_error),
-			num_states(rhs.num_states), k1(num_states), k2(num_states), 
-			k3(num_states), k4(num_states), k5(num_states), k6(num_states) {}
+		Stepper(boost::python::object sys) : system(sys), state_attr(sys.attr("state")), 
+			saved(false), num_states( len(system) ), previous_time(0), 
+			previous_state(num_states), previous_error(num_states), 
+			current_error(num_states, 0.0), k1(num_states), k2(num_states), k3(num_states), 
+			k4(num_states), k5(num_states), k6(num_states), 
+			state_is_property(PyObject_HasAttrString(state_attr.ptr(), "__set__")) {} 
+		Stepper(const Stepper& rhs) : system(rhs.system), state_attr(system.attr("state")), 
+			saved(rhs.saved), previous_time(rhs.previous_time), 
+			previous_state(rhs.previous_state), previous_error(rhs.previous_error), 
+			current_error(rhs.current_error), num_states(rhs.num_states), k1(num_states), 
+			k2(num_states), k3(num_states), k4(num_states), k5(num_states), k6(num_states), 
+			state_is_property(rhs.state_is_property) {}
 		Stepper& operator=(const Stepper& rhs) {
 			if(this != &rhs) {
-				system = boost::python::object(rhs.system);
+				set_system(rhs.system);
 				saved = rhs.saved;
 				previous_time = rhs.previous_time;
 				previous_state = rhs.previous_state;
@@ -122,48 +108,66 @@ namespace lyapunov {
 			}
 		}
 		~Stepper() = default;
-
+		
+		void write_state(std::vector<double>& new_state) {
+			using namespace boost::python;
+			if(state_is_property) {
+				list state_list;
+				for(auto x : new_state) state_list.append(x);
+				state_attr.attr("__set__")(state_list);
+			} else {
+				list state_list = extract<list>(state_attr);
+				vector_to_list(state_list, new_state);
+			}
+		}
 		boost::python::object get_system() const { return system; }
-		void set_system(boost::python::object new_system) { system = new_system; }
+		void set_system(boost::python::object new_system) { 
+			using namespace boost::python;
+			system = new_system; 
+			state_attr = system.attr("state");
+			state_is_property = PyObject_HasAttrString(state_attr.ptr(), "__set__");
+		}
 		void find_root(double step_size, double min_step_size) {
 			//implements a simply bisection rootfinder which passes
 			//the system _through_ the boundary
 			using namespace boost::python;
 			//initialize interval for bisection method
-			double result_time = extract<double>(system.attr("time"));
+			object time_obj = system.attr("time");
+			double result_time = extract<double>(time_obj);
 			Interval interval = {result_time-step_size, result_time};
 
 			//save state after crossing
 			std::vector<double> result_state(num_states);
-			list state = extract<list>(system.attr("state"));
+			list state = extract<list>(state_attr);
 			list_to_vector(result_state, state);
-			std::string new_mode = extract<std::string>(system.attr("mode"));
+			object mode_obj = system.attr("mode");
+			std::string new_mode = extract<std::string>(mode_obj);
 			
 			//need to be able to step back across the boundary
 			if(!revert()) RevertError();
 
 			//get mode before crossing
-			std::string old_mode = extract<std::string>(system.attr("mode"));
+			std::string old_mode = extract<std::string>(mode_obj);
 			std::string current_mode;
 			while(interval.length() > min_step_size) {
 				step(interval.length() / 2.0);
-				current_mode = extract<std::string>(system.attr("mode"));
+				current_mode = extract<std::string>(mode_obj);
 				if(current_mode == old_mode) 
 					interval.lower = interval.midpoint();
 				else if(current_mode == new_mode) {
 					//We're closer to the boundary than before, on the proper side.
 					interval.upper = interval.midpoint();
-					result_time = extract<double>(system.attr("time"));
+					result_time = extract<double>(time_obj);
 					list_to_vector(result_state, state);
 					revert();
 				} else RootFindError();
 			}
 
 			//in case the rootfind didn't end on the proper side of the boundary...
-			current_mode = extract<std::string>(system.attr("mode"));
+			current_mode = extract<std::string>(mode_obj);
 			if(current_mode == old_mode) {
-				vector_to_list(state, result_state);
-				system.attr("time") = result_time;
+				write_state(result_state);
+				time_obj = object(result_time);
 			}
 		}
 		void step(double h) {

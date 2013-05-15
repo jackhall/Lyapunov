@@ -195,19 +195,19 @@ class Solver:
 		self.x_out = [list(self.system.state)]
 		self.t_out = [self.system.time]
 		if self.events is True:
-			current_mode = self.system.mode #assumes immutable type!
+			current_mode = str(self.system.mode) #assumes string type!
 		#main solver loop
 		while self.system.time < final_time:
 			self.stepper.step(step_size)
 			if self.events is True:
 				#Detect an event - defined as a change in system.mode.
 				if self.system.mode != current_mode:
-					self._find_root(step_size)
+					#self._find_root(step_size)
 					#C++ version drafted but still buggy
 					#self.stepper.find_root(step_size, 
 					#					   step_size*self.min_ratio);
 					assert current_mode != self.system.mode
-					current_mode = self.system.mode
+					current_mode = str(self.system.mode)
 					if self.slide is True:
 						self.stepper.step(step_size)
 						if self.system.mode != current_mode:

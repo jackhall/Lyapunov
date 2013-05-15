@@ -6,6 +6,7 @@ import solver
 
 sys = solver.DemoNoEvents()
 sys.time = 0.0
+print hasattr(sys, "state")
 stepper = lyapunov.Stepper(sys)
 print "No Events - mass spring damper system"
 print "Step 0:"
@@ -26,7 +27,7 @@ sys2 = solver.DemoEvents()
 sol = solver.Solver(sys2, events=True, slide=True, min_ratio=.1)
 print "\nWith Events, With Sliding - satellite control"
 start = time.clock()
-sys2.x_out, sys2.t_out = sol.simulate(2)
+sys2.x_out, sys2.t_out = sol.simulate(1.7)
 print "time elapsed ", time.clock() - start
 sys2.plot()
 
