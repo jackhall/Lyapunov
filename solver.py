@@ -25,7 +25,7 @@ class System:
 							   + ' states, not ' + str(len(x)) + '.')
 		self._state = x
 
-	def __call__(self, signal, disturbance=None):
+	def __call__(self):
 		"""Returns state derivatives in a list, as required by vode.
 		   Should not change the state of the system."""
 		if self.__call__.__func__ is System.__call__.__func__:
@@ -33,14 +33,27 @@ class System:
 							   		  + ' does not override __call__.')
 
 
-class DemoNoEvents(System):
+class DemoNoEvents(object):
 	"""Mass spring damper system."""
 	def __init__(self):
-		System.__init__(self, [1.0, 1.0])
+		#self.state = state0
+		self.state = [1.0, 1.0] #why does this not call state's setter?
+
+	def __len__(self):
+		return 2
 
 	def __call__(self):
-		x, v = self.state
-		return [v, -(v + x)]
+		_, v = self._state
+		return [v, self.a]
+
+	@property
+	def state(self):
+		return list(self._state)
+
+	@state.setter
+	def state(self, x):
+		self._state = list(x)
+		self.a = -x[1] - x[0]
 
 	def plot(self):
 		plt.figure()
@@ -51,20 +64,32 @@ class DemoNoEvents(System):
 			plt.close()
 
 
-class DemoEvents(System):
+class DemoEvents(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
-		System.__init__(self, [1.0, 1.0])
+		self.state = [1.0, 1.0]
+		self.u = 1 if self.mode == 'a' else -1
 	
 	@property
 	def mode(self):
-		x, v = self.state
+		x, v = self._state
 		return 'a' if v < -0.5*x else 'b'
 
+	def __len__(self):
+		return 2
+
+	@property
+	def state(self):
+		return list(self._state)
+
+	@state.setter
+	def state(self, x):
+		self._state = list(x)
+		self.u = 1 if self.mode == 'a' else -1
+
 	def __call__(self):
-		x, v = self.state
-		u = 1 if self.mode == 'a' else -1
-		return [v, u]
+		_, v = self.state
+		return [v, self.u]
 
 	def plot(self):
 		plt.figure()
@@ -127,7 +152,7 @@ def norm(x):
 	return math.sqrt(result)
 
 
-class Solver:
+class Solver(object):
 	def __init__(self, system, events=False, slide=True, min_ratio=.01): 
 		self.system = system
 		self.stepper = lyapunov.Stepper(system)
@@ -159,9 +184,9 @@ class Solver:
 		interval = TimeInterval(self.system.time - step_size, 
 								self.system.time)
 		min_step_size = interval.length * self.min_ratio 
-		end_x, end_t = list(self.system.state), self.system.time
+		end_x, end_t = self.system.state, self.system.time
 		self.stepper.revert() #take one step backwards
-		old_mode = self.system.mode
+		old_mode = str(self.system.mode)
 		while interval.length > min_step_size: 
 			#print (interval.lower, interval.upper)
 			self.stepper.step(interval.length / 2.0)
@@ -170,7 +195,7 @@ class Solver:
 				interval.lower = interval.midpoint
 			else:
 				interval.upper = interval.midpoint
-				end_x, end_t = list(self.system.state), self.system.time
+				end_x, end_t = self.system.state, self.system.time
 				self.stepper.revert()
 		if self.system.mode == old_mode:
 			self.system.state, self.system.time = end_x, end_t
@@ -179,10 +204,10 @@ class Solver:
 	def _slide(self, step_size, final_time):
 		min_step_size = step_size * self.min_ratio
 		self.stepper.step(min_step_size)
-		old_mode = self.system.mode
+		old_mode = str(self.system.mode)
 		self.stepper.step(min_step_size)
 		while self.system.mode != old_mode and self.system.time < final_time:
-			old_mode = self.system.mode
+			old_mode = str(self.system.mode)
 			self.stepper.euler_step(min_step_size)
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
@@ -204,8 +229,8 @@ class Solver:
 				if self.system.mode != current_mode:
 					#self._find_root(step_size)
 					#C++ version drafted but still buggy
-					#self.stepper.find_root(step_size, 
-					#					   step_size*self.min_ratio);
+					self.stepper.find_root(step_size, 
+										   step_size*self.min_ratio);
 					assert current_mode != self.system.mode
 					current_mode = str(self.system.mode)
 					if self.slide is True:

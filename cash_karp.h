@@ -66,7 +66,7 @@ namespace lyapunov {
 
 
 	class Stepper {
-		boost::python::object system, state_attr;
+		boost::python::object system;
 		bool saved, state_is_property;
 		unsigned int num_states;
 		double previous_time;
@@ -84,18 +84,26 @@ namespace lyapunov {
 
 	public:
 		Stepper() = delete;
-		Stepper(boost::python::object sys) : system(sys), state_attr(sys.attr("state")), 
-			saved(false), num_states( len(system) ), previous_time(0), 
-			previous_state(num_states), previous_error(num_states), 
-			current_error(num_states, 0.0), k1(num_states), k2(num_states), k3(num_states), 
-			k4(num_states), k5(num_states), k6(num_states), 
-			state_is_property(PyObject_HasAttrString(state_attr.ptr(), "__set__")) {} 
-		Stepper(const Stepper& rhs) : system(rhs.system), state_attr(system.attr("state")), 
-			saved(rhs.saved), previous_time(rhs.previous_time), 
-			previous_state(rhs.previous_state), previous_error(rhs.previous_error), 
-			current_error(rhs.current_error), num_states(rhs.num_states), k1(num_states), 
-			k2(num_states), k3(num_states), k4(num_states), k5(num_states), k6(num_states), 
-			state_is_property(rhs.state_is_property) {}
+		Stepper(boost::python::object sys) 
+		  : system(sys), 
+			saved(false), 
+			num_states( len(system) ), 
+			previous_time(0), 
+			previous_state(num_states), 
+			previous_error(num_states), 
+			current_error(num_states, 0.0), 
+			k1(num_states), k2(num_states), k3(num_states), 
+			k4(num_states), k5(num_states), k6(num_states) {} 
+		Stepper(const Stepper& rhs) 
+		  : system(rhs.system), 
+			saved(rhs.saved), 
+			num_states(rhs.num_states),
+			previous_time(rhs.previous_time), 
+			previous_state(rhs.previous_state), 
+			previous_error(rhs.previous_error), 
+			current_error(rhs.current_error), 
+			k1(num_states), k2(num_states), k3(num_states), 
+			k4(num_states), k5(num_states), k6(num_states) {}
 		Stepper& operator=(const Stepper& rhs) {
 			if(this != &rhs) {
 				set_system(rhs.system);
@@ -114,18 +122,15 @@ namespace lyapunov {
 			if(state_is_property) {
 				list state_list;
 				for(auto x : new_state) state_list.append(x);
-				state_attr.attr("__set__")(state_list);
+				system.attr("state").attr("__set__")(state_list);
 			} else {
-				list state_list = extract<list>(state_attr);
+				list state_list = extract<list>(system.attr("state"));
 				vector_to_list(state_list, new_state);
 			}
 		}
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { 
-			using namespace boost::python;
 			system = new_system; 
-			state_attr = system.attr("state");
-			state_is_property = PyObject_HasAttrString(state_attr.ptr(), "__set__");
 		}
 		void find_root(double step_size, double min_step_size) {
 			//implements a simply bisection rootfinder which passes
@@ -137,9 +142,8 @@ namespace lyapunov {
 			Interval interval = {result_time-step_size, result_time};
 
 			//save state after crossing
-			std::vector<double> result_state(num_states);
-			list state = extract<list>(state_attr);
-			list_to_vector(result_state, state);
+			//should system.attr("state") be called to check every time?
+			list result_state = extract<list>(system.attr("state"));
 			object mode_obj = system.attr("mode");
 			std::string new_mode = extract<std::string>(mode_obj);
 			
@@ -158,7 +162,7 @@ namespace lyapunov {
 					//We're closer to the boundary than before, on the proper side.
 					interval.upper = interval.midpoint();
 					result_time = extract<double>(time_obj);
-					list_to_vector(result_state, state);
+					result_state = extract<list>(system.attr("state"));
 					revert();
 				} else RootFindError();
 			}
@@ -166,7 +170,7 @@ namespace lyapunov {
 			//in case the rootfind didn't end on the proper side of the boundary...
 			current_mode = extract<std::string>(mode_obj);
 			if(current_mode == old_mode) {
-				write_state(result_state);
+				system.attr("state") = result_state;
 				time_obj = object(result_time);
 			}
 		}
@@ -183,6 +187,7 @@ namespace lyapunov {
 
 			//second slope
 			scale_and_add(state, k1, h*a<2>(1));
+			system.attr("state") = state;
 			system.attr("time") = t + c[1]*h;
 			list_to_vector(k2, extract<list>(system()));
 
@@ -190,6 +195,7 @@ namespace lyapunov {
 			vector_to_list(state, previous_state);
 			scale_and_add(state, k1, h*a<3>(1));
 			scale_and_add(state, k2, h*a<3>(2));
+			system.attr("state") = state;
 			system.attr("time") = t + c[2]*h;
 			list_to_vector(k3, extract<list>(system()));
 
@@ -198,6 +204,7 @@ namespace lyapunov {
 			scale_and_add(state, k1, h*a<4>(1));
 			scale_and_add(state, k2, h*a<4>(2));
 			scale_and_add(state, k3, h*a<4>(3));
+			system.attr("state") = state;
 			system.attr("time") = t + c[3]*h;
 			list_to_vector(k4, extract<list>(system()));
 
@@ -207,6 +214,7 @@ namespace lyapunov {
 			scale_and_add(state, k2, h*a<5>(2));
 			scale_and_add(state, k3, h*a<5>(3));
 			scale_and_add(state, k4, h*a<5>(4));
+			system.attr("state") = state;
 			system.attr("time") = t + c[4]*h;
 			list_to_vector(k5, extract<list>(system()));
 
@@ -217,6 +225,7 @@ namespace lyapunov {
 			scale_and_add(state, k3, h*a<6>(3));
 			scale_and_add(state, k4, h*a<6>(4));
 			scale_and_add(state, k5, h*a<6>(5));
+			system.attr("state") = state;
 			system.attr("time") = t + c[5]*h;
 			list_to_vector(k6, extract<list>(system()));
 
@@ -228,6 +237,7 @@ namespace lyapunov {
 			scale_and_add(state, k4, h*b5[3]);
 			scale_and_add(state, k5, h*b5[4]);
 			scale_and_add(state, k6, h*b5[5]);
+			system.attr("state") = state;
 			system.attr("time") = t + h;
 
 			//error update
@@ -274,6 +284,7 @@ namespace lyapunov {
 			if(!saved) return false;
 			list state = extract<list>(system.attr("state"));
 			vector_to_list(state, previous_state);
+			system.attr("state") = state;
 			system.attr("time") = previous_time;
 			std::swap(current_error, previous_error);
 			saved = false;
