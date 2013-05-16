@@ -7,6 +7,9 @@ class State(object):
 	""" A descriptor to ensure proper state semantics. """
 	#Should state length be enforced? 
 	#	No, because manifold solving may use a subset of states.
+	#If states are tuples, then there are no problems with mutability
+	#or returning internal bindings! This descriptor would not be 
+	#needed.
 	def __init__(self, fget, fset=None):
 		self.fget = fget
 		self.fset = fset
@@ -39,7 +42,7 @@ class Output(object):
 	""" A descriptor for block-diagram-style outputs. """
 	def __init__(self, fget):
 		self.fget = fget
-		self._sinks = None
+		self._sinks = []
 
 	def __get__(self, obj, objtype=None):
 		if obj is None:
@@ -47,17 +50,13 @@ class Output(object):
 		return self.fget(obj)
 
 	def __delete__(self, obj):
-		if self._sinks is not None:
-			for sink in self._sinks:
-				sink.break_link()
+		for sink in self._sinks:
+			sink.break_link()
 
 	def add_sink(self, sink):
 		if not hasattr(sink, "break_link"):
 			raise AttributeError("Sinks should implement a 'break_link' method.")
-		if self._sinks is None:
-			self._sinks = [sink]
-		else:
-			self._sinks.append(sink)
+		self._sinks.append(sink)
 
 
 class Input(object):
