@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import lyapunov
 
 class State(object):
-	""" A descriptor to ensure proper state semantics.
-		Should state length be enforced? """
+	""" A descriptor to ensure proper state semantics. """
+	#Should state length be enforced? 
+	#	No, because manifold solving may use a subset of states.
 	def __init__(self, fget, fset=None):
 		self.fget = fget
 		self.fset = fset
@@ -33,6 +34,52 @@ class State(object):
 	def setter(self, fset):
 		return type(self)(self.fget, fset)
 
+
+class Output(object):
+	""" A descriptor for block-diagram-style outputs. """
+	def __init__(self, fget):
+		self.fget = fget
+		self._sinks = None
+
+	def __get__(self, obj, objtype=None):
+		if obj is None:
+			return self
+		return self.fget(obj)
+
+	def __delete__(self, obj):
+		if self._sinks is not None:
+			for sink in self._sinks:
+				sink.break_link()
+
+	def add_sink(self, sink):
+		if not hasattr(sink, "break_link"):
+			raise AttributeError("Sinks should implement a 'break_link' method.")
+		if self._sinks is None:
+			self._sinks = [sink]
+		else:
+			self._sinks.append(sink)
+
+
+class Input(object):
+	""" A descriptor for block-diagram-stype inputs. """
+	def __init__(self, fget):
+		self.fget = fget
+
+	def __get__(self, obj, objtype=None):
+		if obj is None:
+			return self
+		try:
+			return self.fget(obj)
+		except TypeError:
+			raise NotImplementedError("Link to source (an Output) does not exist.")
+	
+	def link_to(self, source):
+		""" Meant to be called as a method, not as a decorator. """
+		self.fget = source.fget
+		source.add_sink(self)
+
+	def break_link(self):
+		self.fget = None
 
 #write mode descriptor/decorator?
 
@@ -107,21 +154,25 @@ class SlidingDemo(object):
 			plt.close()
 
 
-class ReferenceFilter(object):
+class Filter(object):
 	"""Differentiates a reference signal with a linear filter. The 
 		'output' attribute refers to the complete reference signal."""
-	def __init__(self, gains, reference0):
+	def __init__(self, gains, signal0):
 		"""Place poles before constructing. 'gains' is a list of
 			coefficients of the characteristic equation (normalized),
 			from lowest-highest order. Exclude the highest, since it 
 			should be equal to one anyway."""
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
-		self.state = [reference0].append([0.0]*(self._num_states - 1))
+		self.state = [signal0].append([0.0]*(self._num_states - 1))
 		self._gains = gains #(244, 117.2, 18.75) #check signs?
 
 	def __len__(self):
 		return self._num_states
+
+	@Input
+	def signal(self):
+		pass
 
 	@State
 	def state(self):
@@ -131,11 +182,11 @@ class ReferenceFilter(object):
 	def state(self, x):
 		self._state = x
 
-	def __call__(self, signal):
+	def __call__(self):
 		"""Since the input signal is needed when the state is set,
 			there's no need to pass it to __call__."""
 		xndot = (sum(-q*d for (q,d) in zip(self._state, self._gains)) 
-				 + self._gains[0]*signal) #computes the only nontrivial derivative
+				 + self._gains[0]*self.signal) #computes the only nontrivial derivative
 		return self._state[1:].append(xndot)
 
 

@@ -1,9 +1,9 @@
-import solver
+import lyapunov
 
-
-class Motor(System):
+class Motor(object):
 	def __init__(self, state0):
-		System.__init__(self, state0)
+		self.time = 0.0
+		self.state = state0
 		self.Rs = 10 	#stator winding resistance - ohms
 		self.Ls = 0.14 	#stator winding inductance - henrys
 		self.Rr = 10 	#rotor winding resistance - ohms
@@ -19,14 +19,31 @@ class Motor(System):
 		self.b = B / J
 		self.c = K * Ls / J
 
-	@System.state.setter
+	@lyapunov.State
+	def state(self)
+		return self._state
+
+	@state.setter
 	def state(self, x):
-		self._state = list(x)
+		self._state = x
 		self._output = self.h_complete(x)
 
-	@property
+	@lyapunov.Input
+	def u(self):
+		pass
+	
+	@lyapunov.Input
+	def d(self):
+		""" Disturbance force at a particular time step.
+			Must be function with respect to time. """
+		return 0.0
+
+	@lyapunov.Output
 	def output(self):
 		return self._output
+	
+	def __call__(self, control_effort, disturbance):
+		return self.f(self._state, self.u, self.d)
 
 	def f(self, x, u, d):
 		x1, x2, x3, __ = x
@@ -43,19 +60,20 @@ class Motor(System):
 		y2dot = -self.b*x3 + self.c*x1*x2
 		return y, ydot, y2dot
 
-	def __call__(self, control_effort, disturbance):
-		return self.f(self._state, control_effort, disturbance)
 
-
-class Observer(System):
+class Observer(object):
 	def __init__(self, plant):
-		System.__init__(self, [0.0, 0.0, 0.0, 0.0])
+		self.state = [0.0, 0.0, 0.0, 0.0]
 		self.plant = plant
 		self.Lmax = 100.0 #this value is arbitrary
 
-	@System.state.setter
+	@lyapunov.State
+	def state(self):
+		return self._state
+
+	@state.setter
 	def state(self, xhat):
-		self._state = list(xhat)
+		self._state = xhat
 		x1, x2, x3, x4 = xhat
 		#computing observer gains...
 		p = self.plant
@@ -75,52 +93,84 @@ class Observer(System):
 		#computing estimated output...
 		self._output = self.plant.h_complete(xhat)
 
-	@property
+	@lyapunov.Output
 	def output(self):
 		return self._output
 
-	def __call__(self, output_signal, control_effort):
-		xdot = self.plant.f(self._state, control_effort, 0.0)
-		output_error = output_signal[0] - self._state[3] 
+	@lyapunov.Input
+	def y(self):
+		pass
+
+	@lyapunov.Input
+	def u(self):
+		pass
+
+	def __call__(self):
+		xdot = self.plant.f(self._state, self.u, 0.0)
+		output_error = self.y[0] - self._state[3] 
 		return [xidot + output_error*L 
 				for (xidot, L) in zip(xdot, self._gains)]
 
 
-class FBLController(System):
+class FBLController(object):
 	"""feedback linearizing control"""
 	def __init__(self, plant):
-		System.__init__(self, plant.state)
+		self.plant = plant
 		self._gains = (1.95, 4.69, 3.75) #(k1, k2, k3)
 
-	def __call__(self, reference, output):
+	@lyapunov.Input
+	def x(self):
+		pass
+
+	@lyapunov.Input
+	def r(self):
+		pass
+
+	@lyapunov.Input
+	def y(self):
+		pass
+
+	def __call__(self):
 		"""takes reference(+derivatives) & states, returns control effort"""
 		#Compute the equivalent torque that makes the system linear.
 		p = self.plant 
-		x1, x2, x3, __ = self.state
-		r, rdot, r2dot, r3dot = reference
+		x1, x2, x3, __ = self.x
+		r, rdot, r2dot, r3dot = self.r
 		u_eq = p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
 				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / (p.c*x2)
 		#Now compute the control torque.
 		k1, k2, k3 = self._gains
-		y, ydot, y2dot = self.plant
+		y, ydot, y2dot = self.y
 		u_c = p.Ls * (k1*(r-y) + k2*(rdot-ydot) + k3*(r2dot-y2dot)) / (p.c * x2)
 		return u_eq + u_c
 
 
-class SMController(System):
+class SMController(object):
 	"""sliding mode control"""
 	def __init__(self, plant, eta_value):
 		System.__init__(self, plant.state)
 		self.eta = eta_value
 
-	@System.state.setter
-	def state(self, x):
-		"""updates mode"""
+	@lyapunov.Input
+	def x(self):
 		pass
 
-	def __call__(self, reference):
+	@lyapunov.Input
+	def r(self):
+		pass
+
+	@lyapunov.Input
+	def y(self):
+		pass
+
+	@property
+	def mode(self):
+		"""read self.x and compute mode"""
+		pass
+
+	def __call__(self):
 		"""needs full reference signal, including derivatives"""
-		x1, x2, x3, x4 = self.state
+		x1, x2, x3, x4 = self.x
 		u_eq = 0.0
 		u_d = 0.0
 		return u_eq + u_d
