@@ -3,41 +3,44 @@ import numpy
 import matplotlib.pyplot as plt
 import lyapunov
 
-class System:
-	"""A state machine archetype representing a dynamic system."""
-	def __init__(self, state0):
-		self.state = state0
-		self._num_states = len(state0)
+class State(object):
+	""" A descriptor to ensure proper state semantics.
+		Should state length be enforced? """
+	def __init__(self, fget, fset=None):
+		self.fget = fget
+		self.fset = fset
 
-	def __len__(self):
-		return self._num_states
+	def __get__(self, obj, objtype=None):
+		""" Copy the result of fget to prevent external binding to state.
+			If fget does not return a list, things might get weird. """
+		if obj is None:
+			return self
+		return list(self.fget(obj)) 
 
-	@property
-	def state(self):
-		return self._state
+	def __set__(self, obj, value):
+		""" Copy the input to preserve encapsulation of state.
+			If value is not a list, things might get weird. """
+		if self.fset is None:
+			raise AttributeError("state needs a setter")
+		self.fset(obj, list(value)) 
 
-	@state.setter
-	def state(self, x):
-		"""Extend this to compute output signals (self._output)!
-			Call this version with System.state.fset(self, x)."""
-		if len(x) != self._num_states:
-			raise RuntimeError(str(type(self)) + ' has ' + str(self._num_states)
-							   + ' states, not ' + str(len(x)) + '.')
-		self._state = x
+	def __delete__(self, obj):
+		raise AttributeError("Can't delete the system state.")
 
-	def __call__(self):
-		"""Returns state derivatives in a list, as required by vode.
-		   Should not change the state of the system."""
-		if self.__call__.__func__ is System.__call__.__func__:
-			raise NotImplementedError(str(type(self)) 
-							   		  + ' does not override __call__.')
+	def getter(self, fget):
+		return type(self)(fget, self.fset)
+
+	def setter(self, fset):
+		return type(self)(self.fget, fset)
 
 
-class DemoNoEvents(object):
+#write mode descriptor/decorator?
+
+
+class SimpleDemo(object):
 	"""Mass spring damper system."""
 	def __init__(self):
-		#self.state = state0
-		self.state = [1.0, 1.0] #why does this not call state's setter?
+		self.state = [1.0, 1.0] 
 
 	def __len__(self):
 		return 2
@@ -46,13 +49,13 @@ class DemoNoEvents(object):
 		_, v = self._state
 		return [v, self.a]
 
-	@property
+	@State
 	def state(self):
-		return list(self._state)
+		return self._state
 
 	@state.setter
 	def state(self, x):
-		self._state = list(x)
+		self._state = x
 		self.a = -x[1] - x[0]
 
 	def plot(self):
@@ -64,7 +67,7 @@ class DemoNoEvents(object):
 			plt.close()
 
 
-class DemoEvents(object):
+class SlidingDemo(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
 		self.state = [1.0, 1.0]
@@ -77,13 +80,13 @@ class DemoEvents(object):
 	def __len__(self):
 		return 2
 
-	@property
+	@State
 	def state(self):
-		return list(self._state)
+		return self._state
 
 	@state.setter
 	def state(self, x):
-		self._state = list(x)
+		self._state = x
 		self.u = 1 if self.mode == 'under' else -1
 
 	def __call__(self):
@@ -104,7 +107,7 @@ class DemoEvents(object):
 			plt.close()
 
 
-class ReferenceFilter(System):
+class ReferenceFilter(object):
 	"""Differentiates a reference signal with a linear filter. The 
 		'output' attribute refers to the complete reference signal."""
 	def __init__(self, gains, reference0):
@@ -113,9 +116,20 @@ class ReferenceFilter(System):
 			from lowest-highest order. Exclude the highest, since it 
 			should be equal to one anyway."""
 		#This way, there's no need to handle complex numbers.
-		state0 = [reference0].append([0.0]*(len(gains) - 1))
-		System.__init__(self, state0)
+		self._num_states = len(gains)
+		self.state = [reference0].append([0.0]*(self._num_states - 1))
 		self._gains = gains #(244, 117.2, 18.75) #check signs?
+
+	def __len__(self):
+		return self._num_states
+
+	@State
+	def state(self):
+		return self._state
+
+	@state.setter
+	def state(self, x):
+		self._state = x
 
 	def __call__(self, signal):
 		"""Since the input signal is needed when the state is set,
@@ -132,7 +146,7 @@ class ReferenceFilter(System):
 #	return system()
 
 
-class TimeInterval:
+class TimeInterval(object):
 	def __init__(self, t1, t2):
 		self.lower = t1
 		self.upper = t2
@@ -199,7 +213,6 @@ class Solver(object):
 	#			self.stepper.revert()
 	#	if self.system.mode == old_mode:
 	#		self.system.state, self.system.time = end_x, end_t
-		
 
 	def _slide(self, step_size, final_time):
 		min_step_size = step_size * self.min_ratio
@@ -233,7 +246,7 @@ class Solver(object):
 				#Detect an event - defined as a change in system.mode.
 				if self.system.mode != current_mode:
 					#self._find_root(step_size)
-					#C++ version drafted but still buggy
+					#C++ version is now less buggy than the python version
 					self.stepper.find_root(step_size, 
 										   step_size*self.min_ratio);
 					assert current_mode != self.system.mode
