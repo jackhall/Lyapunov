@@ -21,7 +21,7 @@
 #include <boost/python.hpp>
 #include "cash_karp.h"
 
-BOOST_PYTHON_MODULE(lyapunov) {
+BOOST_PYTHON_MODULE(solvers) {
 	using namespace boost::python;
 	using namespace lyapunov;
 

@@ -3,14 +3,14 @@ CFLAGS = -std=c++11 -g
 LFLAGS = -shared -Wl,-no-undefined -g
 PFLAGS = -lpython2.7 -lboost_python -lboost_system
 
-lyapunov.so : lyapunov.cpp cash_karp.h
-	$(CC) $(CFLAGS) $(PATHS) -fPIC -I/usr/include/python2.7 -o lyapunov.o -c lyapunov.cpp
-	$(CC) $(LFLAGS) $(PFLAGS) -o lyapunov.so lyapunov.o
+solvers.so : solvers.cpp cash_karp.h
+	$(CC) $(CFLAGS) $(PATHS) -fPIC -I/usr/include/python2.7 -o solvers.o -c solvers.cpp
+	$(CC) $(LFLAGS) $(PFLAGS) -o solvers.so solvers.o
 	rm *.o
 
 install :
-	sudo cp lyapunov.so /usr/lib64/python2.7/site-packages/.
-	sudo cp solver.py /usr/lib64/python2.7/site-packages/.
+	sudo cp solvers.so /usr/lib64/python2.7/site-packages/.
+	sudo cp lyapunov.py /usr/lib64/python2.7/site-packages/.
 
 
 #build/libbenoit.so : build/IndexBase.o
