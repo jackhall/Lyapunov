@@ -3,6 +3,7 @@ import numpy
 import matplotlib.pyplot as plt
 import lyapunov
 
+#Not necessary if tuples are used!
 class State(object):
 	""" A descriptor to ensure proper state semantics. """
 	#Should state length be enforced? 
@@ -19,14 +20,14 @@ class State(object):
 			If fget does not return a list, things might get weird. """
 		if obj is None:
 			return self
-		return list(self.fget(obj)) 
+		return self.fget(obj) 
 
 	def __set__(self, obj, value):
 		""" Copy the input to preserve encapsulation of state.
 			If value is not a list, things might get weird. """
 		if self.fset is None:
 			raise AttributeError("state needs a setter")
-		self.fset(obj, list(value)) 
+		self.fset(obj, value) 
 
 	def __delete__(self, obj):
 		raise AttributeError("Can't delete the system state.")

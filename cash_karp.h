@@ -57,6 +57,37 @@ namespace lyapunov {
 	void RootFindError() { PyErr_SetString(PyExc_RuntimeError, "Multiple roots detected."); }
 	void RevertError() { PyErr_SetString(PyExc_RuntimeError, "No state saved for necessary revert."); }
 
+	//rvalue converters for std::vector<double> and boost::python::tuple
+	struct vector_to_python_tuple {
+		static PyObject* convert(const std::vector<double>& x) {
+			using boost::python;
+			list new_tuple(); //is there a way around this list middle stage?
+			for(auto i : x) new_tuple.append(i);
+			return incref(tuple(new_tuple).ptr()); 
+		}
+	};
+
+	//needs work
+	struct vector_from_python_tuple {
+		
+		vector_from_python_tuple() {
+			boost::python::converter::registry::push_back(&convertible,
+				&construct, boost::python::type_id<std::vector<double>>());
+		}
+		static void* convertible(PyObject* obj_ptr) {
+			if (!PyTuple_Check(obj_ptr)) return 0;
+			return obj_ptr;
+		}
+		static void construct(PyObject* obj_ptr,
+			    boost::python::converter::rvalue_from_python_stage1_data* data) {
+			const char* value = PyString_AsString(obj_ptr);	
+			assert(value);
+			void* storage = ((boost::python::converter::rvalue_from_python_storage<QString>*)data)->storage.bytes;
+			new (storage) QString(value);
+			data->convertible = storage;
+		}
+	};
+	
 
 	struct Interval {
 		double lower, upper;
@@ -64,7 +95,7 @@ namespace lyapunov {
 		double midpoint() const { return (upper + lower)/2.0; }
 	}; 
 
-
+	
 	class Stepper {
 		boost::python::object system;
 		bool saved, state_is_property;
@@ -73,7 +104,7 @@ namespace lyapunov {
 		std::vector<double> previous_state, previous_error, current_error;
 		std::vector<double> k1, k2, k3, k4, k5, k6;
 
-		void scale_and_add(boost::python::list& x, 
+		void scale_and_add(boost::python::tuple& x, 
 						   const std::vector<double>& y, double factor) {
 			for(unsigned int i=0; i<num_states; ++i) x[i] += y[i] * factor;
 		}
@@ -125,7 +156,7 @@ namespace lyapunov {
 		//		system.attr("state").attr("__set__")(state_list);
 		//	} else {
 		//		list state_list = extract<list>(system.attr("state"));
-		//		vector_to_list(state_list, new_state);
+		//		vector_to_tuple(state_list, new_state);
 		//	}
 		//}
 		boost::python::object get_system() const { return system; }
@@ -143,7 +174,7 @@ namespace lyapunov {
 
 			//save state after crossing
 			//should system.attr("state") be called to check every time?
-			list result_state = extract<list>(system.attr("state"));
+			tuple result_state = extract<tuple>(system.attr("state"));
 			object mode_obj = system.attr("mode");
 			std::string new_mode = extract<std::string>(mode_obj);
 			
@@ -162,7 +193,7 @@ namespace lyapunov {
 					//We're closer to the boundary than before, on the proper side.
 					interval.upper = interval.midpoint();
 					result_time = extract<double>(time_obj);
-					result_state = extract<list>(system.attr("state"));
+					result_state = extract<tuple>(system.attr("state"));
 					revert();
 				} else RootFindError();
 			}
@@ -177,49 +208,52 @@ namespace lyapunov {
 		void step(double h) {
 			//h is the step size
 			using namespace boost::python;
-			list state = extract<list>(system.attr("state"));
-			list_to_vector(previous_state, state);
+			//extract state directly to vector?
+			std::vector<double> state = 
+				extract< std::vector<double> >(system.attr("state")); 
+			previous_state = state;
 			std::swap(previous_error, current_error);
 			double t = extract<double>(system.attr("time"));
 
 			//first slope
-			list_to_vector(k1, extract<list>(system()));
+			//rename conversion routines!
+			k1 = extract< std::vector<double> >(system());
 
 			//second slope
 			scale_and_add(state, k1, h*a<2>(1));
 			system.attr("state") = state;
 			system.attr("time") = t + c[1]*h;
-			list_to_vector(k2, extract<list>(system()));
+			k2 = extract< std::vector<double> >(system());
 
 			//third slope
-			vector_to_list(state, previous_state);
+			state = previous_state; //this assignment might be extra work
 			scale_and_add(state, k1, h*a<3>(1));
 			scale_and_add(state, k2, h*a<3>(2));
 			system.attr("state") = state;
 			system.attr("time") = t + c[2]*h;
-			list_to_vector(k3, extract<list>(system()));
+			k3 = extract< std::vector<double> >(system());
 
 			//fourth slope
-			vector_to_list(state, previous_state);
+			state = previous_state;
 			scale_and_add(state, k1, h*a<4>(1));
 			scale_and_add(state, k2, h*a<4>(2));
 			scale_and_add(state, k3, h*a<4>(3));
 			system.attr("state") = state;
 			system.attr("time") = t + c[3]*h;
-			list_to_vector(k4, extract<list>(system()));
+			k4 = extract< std::vector<double> >(system());
 
 			//fifth slope
-			vector_to_list(state, previous_state);
+			state = previous_state;
 			scale_and_add(state, k1, h*a<5>(1));
 			scale_and_add(state, k2, h*a<5>(2));
 			scale_and_add(state, k3, h*a<5>(3));
 			scale_and_add(state, k4, h*a<5>(4));
 			system.attr("state") = state;
 			system.attr("time") = t + c[4]*h;
-			list_to_vector(k5, extract<list>(system()));
+			k5 = extract< std::vector<double> >(system());
 
 			//sixth slope
-			vector_to_list(state, previous_state);
+			state = previous_state;
 			scale_and_add(state, k1, h*a<6>(1));
 			scale_and_add(state, k2, h*a<6>(2));
 			scale_and_add(state, k3, h*a<6>(3));
@@ -227,10 +261,10 @@ namespace lyapunov {
 			scale_and_add(state, k5, h*a<6>(5));
 			system.attr("state") = state;
 			system.attr("time") = t + c[5]*h;
-			list_to_vector(k6, extract<list>(system()));
+			k6 = extract< std::vector<double> >(system());
 
 			//state update
-			vector_to_list(state, previous_state);
+			state = previous_state;
 			scale_and_add(state, k1, h*b5[0]);
 			scale_and_add(state, k2, h*b5[1]);
 			scale_and_add(state, k3, h*b5[2]);
@@ -249,30 +283,30 @@ namespace lyapunov {
 			scale_and_add(current_error, k5, h*b4[4]);
 			scale_and_add(current_error, k6, h*b4[5]);
 			for(unsigned int i=0; i<num_states; ++i) {
-				current_error[i] -= extract<double>(state[i]);
+				current_error[i] -= state[i];
 				current_error[i] *= -1.0;
 			}
 
 			//flag prior state/error as saved
 			saved = true;
 		}
-		void list_to_vector(std::vector<double>& y, boost::python::list x) const {
+		void tuple_to_vector(std::vector<double>& y, boost::python::tuple x) const {
 			for(unsigned int i=0; i<num_states; ++i) 
 				y[i] = boost::python::extract<double>(x[i]);
 		}
-		void vector_to_list(boost::python::list y, std::vector<double> x) {
+		void vector_to_tuple(boost::python::tuple y, std::vector<double> x) {
 			for(unsigned int i=0; i<num_states; ++i)
 				y[i] = x[i];
 		}
 		void euler_step(double h) {
 			using namespace boost::python;
 			//h is the step size
-			list state = extract<list>(system.attr("state"));
-			list_to_vector(previous_state, state);
+			tuple state = extract<tuple>(system.attr("state"));
+			tuple_to_vector(previous_state, state);
 			std::swap(previous_error, current_error);
 			double previous_time = extract<double>(system.attr("time"));
 
-			list_to_vector(k1, extract<list>(system()));
+			tuple_to_vector(k1, extract<tuple>(system()));
 
 			for(unsigned int i=0; i<num_states; ++i) 
 				state[i] += k1[i] * h;
@@ -283,8 +317,8 @@ namespace lyapunov {
 		bool revert() {
 			using namespace boost::python;
 			if(!saved) return false;
-			list state = extract<list>(system.attr("state"));
-			vector_to_list(state, previous_state);
+			tuple state = extract<tuple>(system.attr("state"));
+			vector_to_tuple(state, previous_state);
 			system.attr("state") = state;
 			system.attr("time") = previous_time;
 			std::swap(current_error, previous_error);
@@ -294,15 +328,15 @@ namespace lyapunov {
 		void save() {
 			using namespace boost::python;
 			previous_error = current_error;
-			list state = extract<list>(system.attr("state"));
-			list_to_vector(previous_state, state);
+			tuple state = extract<tuple>(system.attr("state"));
+			tuple_to_vector(previous_state, state);
 			previous_time = extract<double>(system.attr("time"));
 			saved = true;
 		}
-		boost::python::list get_error() const { 
+		boost::python::tuple get_error() const { 
 			boost::python::list error_list;
 			for(auto x : current_error) error_list.append(x);
-			return error_list; 
+			return boost::python::tuple(error_list); 
 		}
 		double get_step_size() const {
 			if(saved) 
