@@ -2,11 +2,11 @@
 
 import time
 import lyapunov
-import solver
+import solvers
 
-sys = solver.SimpleDemo()
+sys = lyapunov.SimpleDemo()
 sys.time = 0.0
-stepper = lyapunov.Stepper(sys)
+stepper = solvers.Stepper(sys)
 print "No Events - mass spring damper system"
 print "Step 0:"
 print "state ", sys.state, "time ", sys.time
@@ -31,8 +31,8 @@ print "error ", stepper.error, "slope ", sys()
 #print "time elapsed ", time.clock() - start
 #sys2.plot()
 
-sys3 = solver.SlidingDemo()
-sol = solver.Solver(sys3, points=10000)
+sys3 = lyapunov.SlidingDemo()
+sol = lyapunov.Solver(sys3, points=10000)
 print "\nWith Events, No Sliding - satellite control"
 start = time.clock()
 sys3.x_out, sys3.t_out = sol.simulate(5)

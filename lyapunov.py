@@ -61,7 +61,7 @@ class Output(object):
 
 class Input(object):
 	""" A descriptor for block-diagram-stype inputs. """
-	def __init__(self, fget):
+	def __init__(self, fget=None):
 		self.fget = fget
 
 	def __get__(self, obj, objtype=None):
@@ -86,14 +86,14 @@ class Input(object):
 class SimpleDemo(object):
 	"""Mass spring damper system."""
 	def __init__(self):
-		self.state = [1.0, 1.0] 
+		self.state = (1.0, 1.0) 
 
 	def __len__(self):
 		return 2
 
 	def __call__(self):
 		_, v = self._state
-		return [v, self.a]
+		return (v, self.a)
 
 	@State
 	def state(self):
@@ -116,7 +116,7 @@ class SimpleDemo(object):
 class SlidingDemo(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
-		self.state = [1.0, 1.0]
+		self.state = (1.0, 1.0)
 	
 	@property
 	def mode(self):
@@ -137,7 +137,7 @@ class SlidingDemo(object):
 
 	def __call__(self):
 		_, v = self.state
-		return [v, self.u]
+		return (v, self.u)
 
 	def plot(self):
 		plt.figure()
@@ -154,25 +154,23 @@ class SlidingDemo(object):
 
 
 class Filter(object):
-	"""Differentiates a reference signal with a linear filter. The 
-		'output' attribute refers to the complete reference signal."""
+	""" Differentiates a reference signal with a linear filter. The 
+		'output' attribute refers to the complete reference signal. """
 	def __init__(self, gains, signal0):
-		"""Place poles before constructing. 'gains' is a list of
+		""" Place poles before constructing. 'gains' is a list of
 			coefficients of the characteristic equation (normalized),
 			from lowest-highest order. Exclude the highest, since it 
-			should be equal to one anyway."""
+			should be equal to one anyway. """
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
-		self.state = [signal0].append([0.0]*(self._num_states - 1))
+		self.state = (signal0) + (0.0,)*(self._num_states - 1)
 		self._gains = gains #(244, 117.2, 18.75) #check signs?
 
 	def __len__(self):
 		return self._num_states
 
-	@Input
-	def signal(self):
-		pass
-
+	signal = Input()
+	
 	@State
 	def state(self):
 		return self._state
@@ -186,7 +184,7 @@ class Filter(object):
 			there's no need to pass it to __call__."""
 		xndot = (sum(-q*d for (q,d) in zip(self._state, self._gains)) 
 				 + self._gains[0]*self.signal) #computes the only nontrivial derivative
-		return self._state[1:].append(xndot)
+		return self._state[1:] + (xndot,)
 
 
 
@@ -284,7 +282,7 @@ class Solver(object):
 		if self._autonomous:
 			self.system.time = 0.0 #means that system.time is reserved!
 		step_size = (final_time - self.system.time) / self.points
-		self.x_out = [list(self.system.state)]
+		self.x_out = [self.system.state]
 		self.t_out = [self.system.time]
 		root_count = 0
 		if self.events is True:
@@ -305,14 +303,14 @@ class Solver(object):
 					if root_count > 50:
 						raise RuntimeError("Rootfinder called 50 times.")
 					if self.slide is True:
-						self.x_out.append(list(self.system.state))
+						self.x_out.append(self.system.state)
 						self.t_out.append(self.system.time)
 						self.stepper.step(step_size)
 						if self.system.mode != current_mode:
 							self.stepper.revert()
 							if self._slide(step_size, final_time): break
 			#Record for output.
-			self.x_out.append(list(self.system.state))
+			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 		print "Rootfinder was called", root_count, "times."
@@ -331,7 +329,7 @@ class Solver(object):
 		self.y_out = []
 		for x, t in zip(self.x_out, self.t_out):
 			self.system.state, self.system.time = x, t
-			self.y_out.append(list(self.system.output))
+			self.y_out.append(self.system.output)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 		return numpy.array(self.y_out)
 
