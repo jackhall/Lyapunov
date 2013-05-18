@@ -25,6 +25,10 @@ BOOST_PYTHON_MODULE(solvers) {
 	using namespace boost::python;
 	using namespace lyapunov;
 
+	vector_to_python_tuple vec2tup;
+	vector_from_python_tuple tup2vec;
+	//to_python_converter<std::vector<double>, vector_to_python_tuple>();
+
 	class_<Stepper>("Stepper", init<object>())
 		.def("step", &Stepper::step)
 		.def("euler_step", &Stepper::euler_step)

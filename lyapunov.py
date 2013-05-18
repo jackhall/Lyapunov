@@ -1,7 +1,7 @@
 import math
 import numpy
 import matplotlib.pyplot as plt
-import lyapunov
+import solvers
 
 #Not necessary if tuples are used!
 class State(object):
@@ -218,7 +218,7 @@ class Solver(object):
 	def __init__(self, system, events=False, slide=True, min_ratio=.01, 
 			     points=100): 
 		self.system = system
-		self.stepper = lyapunov.Stepper(system)
+		self.stepper = solvers.Stepper(system)
 		#Check basic requirements of a system object...
 		assert hasattr(system, 'state') 	#for setting state
 		try: 
@@ -285,7 +285,6 @@ class Solver(object):
 		step_size = (final_time - self.system.time) / self.points
 		self.x_out = [self.system.state]
 		self.t_out = [self.system.time]
-		root_count = 0
 		if self.events is True:
 			current_mode = str(self.system.mode) #assumes string type!
 		#main solver loop
@@ -300,9 +299,6 @@ class Solver(object):
 										   step_size*self.min_ratio);
 					assert current_mode != self.system.mode
 					current_mode = str(self.system.mode)
-					root_count += 1 
-					if root_count > 50:
-						raise RuntimeError("Rootfinder called 50 times.")
 					if self.slide is True:
 						self.x_out.append(self.system.state)
 						self.t_out.append(self.system.time)
@@ -314,7 +310,6 @@ class Solver(object):
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
-		print "Rootfinder was called", root_count, "times."
 		if self._autonomous:
 		 	del self.system.time
 		try:
