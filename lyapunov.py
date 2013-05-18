@@ -3,41 +3,6 @@ import numpy
 import matplotlib.pyplot as plt
 import solvers
 
-#Not necessary if tuples are used!
-class State(object):
-	""" A descriptor to ensure proper state semantics. """
-	#Should state length be enforced? 
-	#	No, because manifold solving may use a subset of states.
-	#If states are tuples, then there are no problems with mutability
-	#or returning internal bindings! This descriptor would not be 
-	#needed.
-	def __init__(self, fget, fset=None):
-		self.fget = fget
-		self.fset = fset
-
-	def __get__(self, obj, objtype=None):
-		""" Copy the result of fget to prevent external binding to state.
-			If fget does not return a list, things might get weird. """
-		if obj is None:
-			return self
-		return self.fget(obj) 
-
-	def __set__(self, obj, value):
-		""" Copy the input to preserve encapsulation of state.
-			If value is not a list, things might get weird. """
-		if self.fset is None:
-			raise AttributeError("state needs a setter")
-		self.fset(obj, value) 
-
-	def __delete__(self, obj):
-		raise AttributeError("Can't delete the system state.")
-
-	def getter(self, fget):
-		return type(self)(fget, self.fset)
-
-	def setter(self, fset):
-		return type(self)(self.fget, fset)
-
 
 class Output(object):
 	""" A descriptor for block-diagram-style outputs. """
@@ -96,7 +61,7 @@ class SimpleDemo(object):
 		_, v = self._state
 		return (v, self.a)
 
-	@State
+	@property
 	def state(self):
 		return self._state
 
@@ -127,7 +92,7 @@ class SlidingDemo(object):
 	def __len__(self):
 		return 2
 
-	@State
+	@property
 	def state(self):
 		return self._state
 
@@ -165,27 +130,23 @@ class Filter(object):
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
 		self.state = (signal0) + (0.0,)*(self._num_states - 1)
+		self._xndot = 0.0
 		self._gains = gains #(244, 117.2, 18.75) #check signs?
 
 	def __len__(self):
 		return self._num_states
 
 	signal = Input()
-	
-	@State
-	def state(self):
-		return self._state
 
-	@state.setter
-	def state(self, x):
-		self._state = x
+	@Ouput
+	def output(self):
+		return self.state + (self._xndot,)
 
 	def __call__(self):
-		"""Since the input signal is needed when the state is set,
-			there's no need to pass it to __call__."""
-		xndot = (sum(-q*d for (q,d) in zip(self._state, self._gains)) 
-				 + self._gains[0]*self.signal) #computes the only nontrivial derivative
-		return self._state[1:] + (xndot,)
+		""" Computes the only nontrivial derivative. """
+		self._xndot = (sum(-q*d for (q,d) in zip(self.state, self._gains)) 
+					+ self._gains[0]*self.signal) 
+		return self.state[1:] + (self._xndot,)
 
 
 
