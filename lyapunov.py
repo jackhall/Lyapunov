@@ -25,23 +25,27 @@ class Output(object):
 		self._sinks.append(sink)
 
 
+#instance descriptor ideas:
+#	assign callback to a "hidden" name in each instance
+#	make descriptor a metaclass
+
 class Input(object):
 	""" A descriptor for block-diagram-stype inputs. """
-	def __init__(self, fget=None):
-		self.fget = fget
+	def __init(self, instance, attribute):
+		self.instance = instance
+		self.attribute = attribute
 
 	def __get__(self, obj, objtype=None):
 		if obj is None:
 			return self
-		try:
-			return self.fget(obj)
-		except TypeError:
-			raise NotImplementedError("Link to source (an Output) does not exist.")
+		return getattr(self.instance, self.attribute)
 	
-	def link_to(self, source):
+	def link_to(self, instance, attribute):
 		""" Meant to be called as a method, not as a decorator. """
-		self.fget = source.fget
-		source.add_sink(self)
+		self.instance = instance #sets descriptor behavior for all instances!
+		self.attribute = attribute
+		#self.fget = source.fget
+		#source.add_sink(self)
 
 	def break_link(self):
 		self.fget = None
@@ -61,6 +65,8 @@ class SimpleDemo(object):
 		_, v = self._state
 		return (v, self.a)
 
+	u = Input()
+
 	@property
 	def state(self):
 		return self._state
@@ -68,7 +74,10 @@ class SimpleDemo(object):
 	@state.setter
 	def state(self, x):
 		self._state = x
-		self.a = -x[1] - x[0]
+		try:
+			self.a = -x[1] - x[0] + self.u
+		except NotImplementedError:
+			self.a = -x[1] - x[0]
 
 	def plot(self):
 		plt.figure()
@@ -119,6 +128,11 @@ class SlidingDemo(object):
 			plt.close()
 
 
+class ControlDemo(object):
+	pass
+
+
+
 class Filter(object):
 	""" Differentiates a reference signal with a linear filter. The 
 		'output' attribute refers to the complete reference signal. """
@@ -129,7 +143,7 @@ class Filter(object):
 			should be equal to one anyway. """
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
-		self.state = (signal0) + (0.0,)*(self._num_states - 1)
+		self.state = (signal0,) + (0.0,)*(self._num_states - 1)
 		self._xndot = 0.0
 		self._gains = gains #(244, 117.2, 18.75) #check signs?
 
@@ -138,7 +152,7 @@ class Filter(object):
 
 	signal = Input()
 
-	@Ouput
+	@Output
 	def output(self):
 		return self.state + (self._xndot,)
 
@@ -156,16 +170,16 @@ class Filter(object):
 #	return system()
 
 
-class TimeInterval(object):
-	def __init__(self, t1, t2):
-		self.lower = t1
-		self.upper = t2
-	@property
-	def length(self):
-		return self.upper - self.lower
-	@property
-	def midpoint(self):
-		return (self.upper + self.lower) / 2.0
+#class TimeInterval(object):
+#	def __init__(self, t1, t2):
+#		self.lower = t1
+#		self.upper = t2
+#	@property
+#	def length(self):
+#		return self.upper - self.lower
+#	@property
+#	def midpoint(self):
+#		return (self.upper + self.lower) / 2.0
 
 
 def norm(x):

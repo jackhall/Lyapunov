@@ -5,9 +5,8 @@ import lyapunov
 #FBL on motor without observer
 
 class Motor(object):
-	def __init__(self, state0):
+	def __init__(self):
 		self.time = 0.0
-		self.state = state0
 		self.Rs = 10 	#stator winding resistance - ohms
 		self.Ls = 0.14 	#stator winding inductance - henrys
 		self.Rr = 10 	#rotor winding resistance - ohms
@@ -16,15 +15,16 @@ class Motor(object):
 		self.B = 0.01 	#viscous friction - N.m.s/rad
 		self.K = 0.714 	#back-emf / torque constant - V.s/rad
 		self.J = 0.25 	#rotational inertia - kg.m2
-		self.alpha = Rs / Ls
-		self.beta = Rr / Lr
-		self.gamma = Vr / Lr
-		self.a = K * Ls / Lr
-		self.b = B / J
-		self.c = K * Ls / J
+		self.alpha = self.Rs / self.Ls
+		self.beta = self.Rr / self.Lr
+		self.gamma = self.Vr / self.Lr
+		self.a = self.K * self.Ls / self.Lr
+		self.b = self.B / self.J
+		self.c = self.K * self.Ls / self.J
+		#self.state = state0
 
 	@property
-	def state(self)
+	def state(self):
 		return self._state
 
 	@state.setter
@@ -73,7 +73,7 @@ class FBLController(object):
 	r = lyapunov.Input()
 	y = lyapunov.Input()
 
-	@lyapunov.Ouput
+	@lyapunov.Output
 	def u(self):
 		return self._control_effort
 
@@ -98,23 +98,23 @@ class FBLNoObsrv:
 		self.output_labels = ['reference angle', 'filtered reference',
 							  'motor angle']
 		#construct subsystems
-		self.plant = Motor((1.0,)*4)
+		self.plant = Motor()
 		self.controller = FBLController(self.plant)
-		self.prefilter = lyapunov.Filter(0.0, (244, 117.2, 18.75))
+		self.prefilter = lyapunov.Filter((244, 117.2, 18.75), 0.0)
 		#link statements to connect subsystems
 		self.plant.u.link_to(self.controller.u)
 		#no disturbance yet		self.plant.d.link_to
 		self.controller.x.link_to(self.plant.state)
-		self.controller.y.link_to(self.plant.y)
+		self.controller.y.link_to(self.plant.output)
 		self.controller.r.link_to(self.prefilter.output)
 		self.prefilter.signal.link_to(self.reference) 
+		self.plant.state = (0.0,)*4
 
 	def __len__(self):
 		return len(self.plant) + len(self.prefilter)
 
 	def __call__(self):
 		qdot = self.prefilter()
-		self.controller()
 		xdot = self.plant() 
 		return xdot + qdot
 
@@ -127,6 +127,7 @@ class FBLNoObsrv:
 		n = len(self.plant)
 		self.plant.state = x[:n]
 		self.prefilter.state = x[n:]
+		self.controller()
 
 	@lyapunov.Output
 	def reference(self):
@@ -208,7 +209,6 @@ class FBLObsrv(FBLNoObsrv):
 	def __call__(self):
 		qdot = self.prefilter()
 		xhatdot = self.observer()
-		self.controller()
 		xdot = self.plant() 
 		return xdot + qdot + xhatdot
 
@@ -223,6 +223,7 @@ class FBLObsrv(FBLNoObsrv):
 		self.plant.state = x[:n]
 		self.prefilter.state = x[n:(n+m)]
 		self.observer.state = x[(n+m):]
+		self.controller()
 
 	@property
 	def output(self):
