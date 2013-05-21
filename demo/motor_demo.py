@@ -40,7 +40,7 @@ class Motor(object):
 	def output(self):
 		return self._output
 	
-	def __call__(self, control_effort, disturbance):
+	def __call__(self):
 		return self.f(self._state, self.u(), self.d())
 
 	def f(self, x, u, d):
@@ -71,15 +71,17 @@ class FBLController(object):
 
 	def __call__(self):
 		"""takes reference(+derivatives) & states, returns control effort"""
+		epsilon = 0.001
 		#Compute the equivalent torque that makes the system linear.
 		p = self.plant 
-		x1, x2, x3, __ = self.x
-		r, rdot, r2dot, r3dot = self.r
-		u_eq = p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
-				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / (p.c*x2)
+		x1, x2, x3, __ = self.x()
+		r, rdot, r2dot, r3dot = self.r()
+		u_eq = (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
+				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) 
+				/ (p.c*x2 + epsilon))
 		#Now compute the control torque.
 		k1, k2, k3 = self._gains
-		y, ydot, y2dot = self.y
+		y, ydot, y2dot = self.y()
 		u_c = p.Ls * (k1*(r-y) + k2*(rdot-ydot) + k3*(r2dot-y2dot)) / (p.c * x2)
 		self._control_effort = u_eq + u_c
 
@@ -92,7 +94,7 @@ class FBLNoObsrv:
 		#construct subsystems
 		self.plant = Motor()
 		self.controller = FBLController(self.plant)
-		self.prefilter = lyapunov.Filter((244, 117.2, 18.75), 0.0)
+		self.prefilter = lyapunov.Filter((244, 117.2, 18.75))
 		#link statements to connect subsystems
 		self.plant.u = self.controller.u
 		#no disturbance yet		self.plant.d.link_to
@@ -101,6 +103,8 @@ class FBLNoObsrv:
 		self.controller.r = self.prefilter.output
 		self.prefilter.signal  = self.reference
 		self.plant.state = (0.0,)*4
+		self.prefilter.state = (0.0,)*len(self.prefilter)
+		self.controller()
 
 	def __len__(self):
 		return len(self.plant) + len(self.prefilter)

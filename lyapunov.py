@@ -80,29 +80,36 @@ class SlidingDemo(object):
 class Filter(object):
 	""" Differentiates a reference signal with a linear filter. The 
 		'output' attribute refers to the complete reference signal. """
-	def __init__(self, gains, signal0):
+	def __init__(self, gains):
 		""" Place poles before constructing. 'gains' is a list of
 			coefficients of the characteristic equation (normalized),
 			from lowest-highest order. Exclude the highest, since it 
 			should be equal to one anyway. """
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
-		self.state = (signal0,) + (0.0,)*(self._num_states - 1)
-		self._xndot = 0.0
-		self._gains = gains #(244, 117.2, 18.75) #check signs?
+		self._gains = gains #check signs?
+		self._state = (0.0,)*(self._num_states) #signal isn't connected yet
 		self.signal = None
+
+	@property
+	def state(self):
+		return self._state
+
+	@state.setter
+	def state(self, x):
+		self._state = x
+		self._xndot = ( sum(-q*d for (q,d) in zip(self._state, self._gains)) 
+					  + self._gains[0]*self.signal()) 
 
 	def __len__(self):
 		return self._num_states
 
 	def output(self):
-		return self.state + (self._xndot,)
+		return self._state + (self._xndot,)
 
 	def __call__(self):
 		""" Computes the only nontrivial derivative. """
-		self._xndot = (sum(-q*d for (q,d) in zip(self.state, self._gains)) 
-					+ self._gains[0]*self.signal) 
-		return self.state[1:] + (self._xndot,)
+		return self._state[1:] + (self._xndot,)
 
 
 
