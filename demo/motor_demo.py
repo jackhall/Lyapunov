@@ -21,7 +21,7 @@ class Motor(object):
 		self.a = self.K * self.Ls / self.Lr
 		self.b = self.B / self.J
 		self.c = self.K * self.Ls / self.J
-		#self.state = state0
+		self.u = None
 
 	@property
 	def state(self):
@@ -32,20 +32,16 @@ class Motor(object):
 		self._state = x
 		self._output = self.h_complete(x)
 
-	u = lyapunov.Input()
-	
-	@lyapunov.Input
 	def d(self):
 		""" Disturbance force at a particular time step.
 			Must be function with respect to time. """
 		return 0.0 #no disturbance by default
 
-	@lyapunov.Output
 	def output(self):
 		return self._output
 	
 	def __call__(self, control_effort, disturbance):
-		return self.f(self._state, self.u, self.d)
+		return self.f(self._state, self.u(), self.d())
 
 	def f(self, x, u, d):
 		x1, x2, x3, __ = x
@@ -68,12 +64,8 @@ class FBLController(object):
 	def __init__(self, plant):
 		self.plant = plant
 		self._gains = (1.95, 4.69, 3.75) #(k1, k2, k3)
+		self.x = self.r = self.y = None
 
-	x = lyapunov.Input()
-	r = lyapunov.Input()
-	y = lyapunov.Input()
-
-	@lyapunov.Output
 	def u(self):
 		return self._control_effort
 
@@ -102,12 +94,12 @@ class FBLNoObsrv:
 		self.controller = FBLController(self.plant)
 		self.prefilter = lyapunov.Filter((244, 117.2, 18.75), 0.0)
 		#link statements to connect subsystems
-		self.plant.u.link_to(self.controller.u)
+		self.plant.u = self.controller.u
 		#no disturbance yet		self.plant.d.link_to
-		self.controller.x.link_to(self.plant.state)
-		self.controller.y.link_to(self.plant.output)
-		self.controller.r.link_to(self.prefilter.output)
-		self.prefilter.signal.link_to(self.reference) 
+		self.controller.x = lambda : self.plant.state #state is a property
+		self.controller.y = self.plant.output
+		self.controller.r = self.prefilter.output
+		self.prefilter.signal  = self.reference
 		self.plant.state = (0.0,)*4
 
 	def __len__(self):
@@ -129,7 +121,6 @@ class FBLNoObsrv:
 		self.prefilter.state = x[n:]
 		self.controller()
 
-	@lyapunov.Output
 	def reference(self):
 		return 0.0 if self.time < 1.0 else 2.0
 
@@ -149,9 +140,10 @@ class FBLNoObsrv:
 
 class Observer(object):
 	def __init__(self, plant):
-		self.state = 0.0, 0.0, 0.0, 0.0
 		self.plant = plant
+		self.state = 0.0, 0.0, 0.0, 0.0
 		self.Lmax = 100.0 #this value is arbitrary
+		self.y = self.u = None
 
 	@property
 	def state(self):
@@ -162,44 +154,41 @@ class Observer(object):
 		self._state = xhat
 		x1, x2, x3, x4 = xhat
 		#computing observer gains...
+		epsilon = 0.001	#a small number to prevent division by zero
 		p = self.plant
 		L4 = 25 - p.b - p.beta - p.alpha
 		L3 = p.alpha*L4 + p.a*p.b*p.c*p.beta*x1**2 - 234
 		L1 = ((1526 - (L3 + (p.b + p.beta)*L4 + (L4 
 			+ (p.alpha - 1))*p.alpha*p.beta*p.a*p.b*p.c*x1**2)*p.alpha**2) 
-			/ (p.c*(p.a*x1*x3 + x2*(p.alpha+p.beta))))
+			/ (p.c*(p.a*x1*x3 + x2*(p.alpha+p.beta)) + epsilon))
 		L2 = ((-(p.alpha + p.beta)*L3 + p.alpha*L4*(p.b + p.beta) 
 			+ (L4 + p.alpha)*p.beta*p.a*p.b*p.c*x1**2 - p.c*x2*L1 - 997) 
-			/ (p.c*x1))
+			/ (p.c*x1 + epsilon))
 		#Set maximum gains! Otherwise they'll blow up when your estimated
-		#system loses observability.
-		L1 = L1 if L1 < self.Lmax else self.Lmax
-		L2 = L2 if L2 < self.Lmax else self.Lmax
+		#system loses observability. This is also fixed with epsilon as above.
+		#L1 = L1 if L1 < self.Lmax else self.Lmax
+		#L2 = L2 if L2 < self.Lmax else self.Lmax
 		self._gains = L1, L2, L3, L4
 		#computing estimated output...
 		self._output = self.plant.h_complete(xhat)
 
-	@lyapunov.Output
 	def output(self):
 		return self._output
 
-	y = lyapunov.Input()
-	u = lyapunov.Input()
-
 	def __call__(self):
-		xdot = self.plant.f(self._state, self.u, 0.0)
-		output_error = self.y[0] - self._state[3] 
+		xdot = self.plant.f(self._state, self.u(), 0.0)
+		output_error = self.y()[0] - self._state[3] 
 		return tuple(
 			[xidot + output_error*L for (xidot, L) in zip(xdot, self._gains)] )
 
 
 class FBLObsrv(FBLNoObsrv):
 	def __init__(self):
-		FBLNoObserv.__init__(self)
+		FBLNoObsrv.__init__(self)
 		self.observer = Observer(self.plant)
-		self.controller.x.link_to(self.observer.state)
-		self.observer.y.link_to(self.plant.output)
-		self.observer.u.link_to(self.controller.u)
+		self.controller.x = lambda : self.observer.state
+		self.observer.y = self.plant.output
+		self.observer.u = self.controller.u 
 		#disturbance is still assumed to be zero
 		self.output_labels.append('estimated angle')
 
@@ -238,11 +227,8 @@ class SMController(object):
 	def __init__(self, plant, eta_value):
 		System.__init__(self, plant.state)
 		self.eta = eta_value
+		self.x = self.r = self.y = None
 
-	x = lyapunov.Input()
-	r = lyapunov.Input()
-	y = lyapunov.Input()
-	
 	@property
 	def mode(self):
 		"""read self.x and compute mode"""
@@ -250,7 +236,7 @@ class SMController(object):
 
 	def __call__(self):
 		"""needs full reference signal, including derivatives"""
-		x1, x2, x3, x4 = self.x
+		x1, x2, x3, x4 = self.x()
 		u_eq = 0.0
 		u_d = 0.0
 		return u_eq + u_d
@@ -260,9 +246,8 @@ class SMCObsrv(FBLObsrv):
 	def __init__(self):
 		FBLObsrv.__init__(self)
 		self.controller = SMController(self.plant)
-		self.plant.u.link_to(self.controller.u)
-		self.controller.r.link_to(self.prefilter.output)
-		self.controller.y.link_to(self.plant.output)
-		self.controller.x.link_to(self.observer.state)
-		self.observer.u.link_to(self.controller.u)
+		self.plant.u = self.observer.u = self.controller.u
+		self.controller.r = self.prefilter.output
+		self.controller.y = self.plant.output
+		self.controller.x = lambda : self.observer.state
 

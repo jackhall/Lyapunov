@@ -3,60 +3,11 @@ import numpy
 import matplotlib.pyplot as plt
 import solvers
 
-
-class Output(object):
-	""" A descriptor for block-diagram-style outputs. """
-	def __init__(self, fget):
-		self.fget = fget
-		self._sinks = []
-
-	def __get__(self, obj, objtype=None):
-		if obj is None:
-			return self
-		return self.fget(obj)
-
-	def __delete__(self, obj):
-		for sink in self._sinks:
-			sink.break_link()
-
-	def add_sink(self, sink):
-		if not hasattr(sink, "break_link"):
-			raise AttributeError("Sinks should implement a 'break_link' method.")
-		self._sinks.append(sink)
-
-
-#instance descriptor ideas:
-#	assign callback to a "hidden" name in each instance
-#	make descriptor a metaclass
-
-class Input(object):
-	""" A descriptor for block-diagram-stype inputs. """
-	def __init(self, instance, attribute):
-		self.instance = instance
-		self.attribute = attribute
-
-	def __get__(self, obj, objtype=None):
-		if obj is None:
-			return self
-		return getattr(self.instance, self.attribute)
-	
-	def link_to(self, instance, attribute):
-		""" Meant to be called as a method, not as a decorator. """
-		self.instance = instance #sets descriptor behavior for all instances!
-		self.attribute = attribute
-		#self.fget = source.fget
-		#source.add_sink(self)
-
-	def break_link(self):
-		self.fget = None
-
-#write mode descriptor/decorator?
-
-
 class SimpleDemo(object):
 	"""Mass spring damper system."""
 	def __init__(self):
 		self.state = (1.0, 1.0) 
+		self.u = None
 
 	def __len__(self):
 		return 2
@@ -64,8 +15,6 @@ class SimpleDemo(object):
 	def __call__(self):
 		_, v = self._state
 		return (v, self.a)
-
-	u = Input()
 
 	@property
 	def state(self):
@@ -76,7 +25,7 @@ class SimpleDemo(object):
 		self._state = x
 		try:
 			self.a = -x[1] - x[0] + self.u
-		except NotImplementedError:
+		except TypeError: 
 			self.a = -x[1] - x[0]
 
 	def plot(self):
@@ -128,11 +77,6 @@ class SlidingDemo(object):
 			plt.close()
 
 
-class ControlDemo(object):
-	pass
-
-
-
 class Filter(object):
 	""" Differentiates a reference signal with a linear filter. The 
 		'output' attribute refers to the complete reference signal. """
@@ -146,13 +90,11 @@ class Filter(object):
 		self.state = (signal0,) + (0.0,)*(self._num_states - 1)
 		self._xndot = 0.0
 		self._gains = gains #(244, 117.2, 18.75) #check signs?
+		self.signal = None
 
 	def __len__(self):
 		return self._num_states
 
-	signal = Input()
-
-	@Output
 	def output(self):
 		return self.state + (self._xndot,)
 
