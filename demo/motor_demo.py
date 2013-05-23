@@ -23,6 +23,9 @@ class Motor(object):
 		self.c = self.K * self.Ls / self.J
 		self.u = None
 
+	def __len__(self):
+		return 4
+
 	@property
 	def state(self):
 		return self._state
@@ -76,13 +79,13 @@ class FBLController(object):
 		p = self.plant 
 		x1, x2, x3, __ = self.x()
 		r, rdot, r2dot, r3dot = self.r()
+		den = epsilon if x2 == 0.0 else p.c*x2
 		u_eq = (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
-				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) 
-				/ (p.c*x2 + epsilon))
+				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
 		#Now compute the control torque.
 		k1, k2, k3 = self._gains
 		y, ydot, y2dot = self.y()
-		u_c = p.Ls * (k1*(r-y) + k2*(rdot-ydot) + k3*(r2dot-y2dot)) / (p.c * x2)
+		u_c = p.Ls * (k1*(r-y) + k2*(rdot-ydot) + k3*(r2dot-y2dot)) / den
 		self._control_effort = u_eq + u_c
 
 
@@ -126,11 +129,11 @@ class FBLNoObsrv:
 		self.controller()
 
 	def reference(self):
-		return 0.0 if self.time < 1.0 else 2.0
+		return 0.0 if self.time < 0.01 else 2.0
 
 	@property
 	def output(self):
-		return (self.reference(), self.prefilter.state[0], self.plant.output[0])
+		return (self.reference(), self.prefilter.state[0], self.plant.output()[0])
 
 	def plot(self):
 		plt.figure()

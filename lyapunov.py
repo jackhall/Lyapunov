@@ -166,43 +166,6 @@ class Solver(object):
 		else:
 			self._min_step_ratio = new_min_ratio
 
-	#def _find_root(self, step_size):
-	#	"""A bisection rootfinder."""
-	#	interval = TimeInterval(self.system.time - step_size, 
-	#							self.system.time)
-	#	min_step_size = interval.length * self.min_ratio 
-	#	end_x, end_t = self.system.state, self.system.time
-	#	self.stepper.revert() #take one step backwards
-	#	old_mode = str(self.system.mode)
-	#	while interval.length > min_step_size: 
-	#		#print (interval.lower, interval.upper)
-	#		self.stepper.step(interval.length / 2.0)
-	#		assert interval.length > min_step_size*0.1
-	#		if self.system.mode == old_mode:
-	#			interval.lower = interval.midpoint
-	#		else:
-	#			interval.upper = interval.midpoint
-	#			end_x, end_t = self.system.state, self.system.time
-	#			self.stepper.revert()
-	#	if self.system.mode == old_mode:
-	#		self.system.state, self.system.time = end_x, end_t
-
-	def _slide(self, step_size, final_time):
-		min_step_size = step_size * self.min_ratio
-		self.stepper.step(min_step_size)
-		old_mode = str(self.system.mode)
-		self.stepper.step(min_step_size)
-		#somehow the solver gets stuck in this loop for small step sizes
-		while self.system.mode != old_mode and self.system.time < final_time:
-			old_mode = str(self.system.mode)
-			self.stepper.euler_step(min_step_size)
-			if self.system.mode == old_mode:
-				self.stepper.revert()
-				self.stepper.euler_step(step_size)
-			self.x_out.append(self.system.state)
-			self.t_out.append(self.system.time)
-		return self.system.time >= final_time
-
 	def simulate(self, final_time):
 		if self._autonomous:
 			self.system.time = 0.0 #means that system.time is reserved!
@@ -217,19 +180,9 @@ class Solver(object):
 			if self.events is True:
 				#Detect an event - defined as a change in system.mode.
 				if self.system.mode != current_mode:
-					#self._find_root(step_size)
-					#C++ version is now less buggy than the python version
 					self.stepper.find_root(step_size, 
 										   step_size*self.min_ratio);
-					assert current_mode != self.system.mode
 					current_mode = str(self.system.mode)
-					if self.slide is True:
-						self.x_out.append(self.system.state)
-						self.t_out.append(self.system.time)
-						self.stepper.step(step_size)
-						if self.system.mode != current_mode:
-							self.stepper.revert()
-							if self._slide(step_size, final_time): break
 			#Record for output.
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
@@ -241,17 +194,15 @@ class Solver(object):
 			return (numpy.array(self.x_out), 
 					numpy.array(self.y_out), 
 					numpy.array(self.t_out))
-		except: 
+		except AttributeError: 
 			return numpy.array(self.x_out), numpy.array(self.t_out)
 	
 	def compute_output(self):
-		assert hasattr(self.system, 'output')
 		self.y_out = []
 		for x, t in zip(self.x_out, self.t_out):
 			self.system.state, self.system.time = x, t
 			self.y_out.append(self.system.output)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
-		return numpy.array(self.y_out)
 
 	
 	#def phase_portrait(self):
