@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import pdb
 import lyapunov
 
 ###########################
@@ -129,7 +130,7 @@ class FBLNoObsrv:
 		self.controller()
 
 	def reference(self):
-		return 0.0 if self.time < 0.01 else 2.0
+		return 0.0 if self.time < 0.001 else 2.0
 
 	@property
 	def output(self):
