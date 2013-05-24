@@ -24,7 +24,7 @@ class SimpleDemo(object):
 	def state(self, x):
 		self._state = x
 		try:
-			self.a = -x[1] - x[0] + self.u
+			self.a = -x[1] - x[0] + self.u()
 		except TypeError: 
 			self.a = -x[1] - x[0]
 
@@ -77,6 +77,46 @@ class SlidingDemo(object):
 			plt.close()
 
 
+class PID(object):
+	def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
+		self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
+		self.r = self.y = None
+		self.state = (0.0,) #integral term
+	
+	def __call__(self):
+		x, v = self.y()
+		error = self.r() - x
+		self._force = self.Kp*error + self.Ki*self.state - self.Kd*v
+		return (error,)
+
+	def u(self):
+		return self._force
+
+
+class SubsystemDemo(object):
+	def __init__(self):
+		self.plant = SimpleDemo()
+		self.control = PID()
+		self.control.y = lambda : self.plant.state
+		self.plant.u = self.control.u
+		self.control.r = self.reference
+		self.time = 0.0
+
+	@property
+	def state(self):
+		return self.plant.state + self.control.state
+
+	@state.setter
+	def state(self, x):
+		self.plant.state = x[:-1]
+		self.control.state = x[-1]
+
+	def reference(self):
+		return 0.0 if self.time < 2.0 else 1.0
+
+	def __len__(self):
+		return 3
+
 class Filter(object):
 	""" Differentiates a reference signal with a linear filter. The 
 		'output' attribute refers to the complete reference signal. """
@@ -111,31 +151,6 @@ class Filter(object):
 		""" Computes the only nontrivial derivative. """
 		return self._state[1:] + (self._xndot,)
 
-
-
-#def ode_func(time, state, system):
-#	system.state = state
-#	system.time = time
-#	return system()
-
-
-#class TimeInterval(object):
-#	def __init__(self, t1, t2):
-#		self.lower = t1
-#		self.upper = t2
-#	@property
-#	def length(self):
-#		return self.upper - self.lower
-#	@property
-#	def midpoint(self):
-#		return (self.upper + self.lower) / 2.0
-
-
-def norm(x):
-	result = 0.0
-	for i in x:
-		result += i**2
-	return math.sqrt(result)
 
 
 class Solver(object):
