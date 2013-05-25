@@ -1,3 +1,21 @@
+#Lyapunov: a library for integrating nonlinear dynamical systems
+#Copyright (C) 2013  John Wendell Hall
+#
+#This program is free software: you can redistribute it and/or modify
+#it under the terms of the GNU General Public License as published by
+#the Free Software Foundation, either version 3 of the License, or
+#(at your option) any later version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#The author may be reached at jackhall@utexas.edu.
+
 import math
 import numpy
 import matplotlib.pyplot as plt
@@ -25,7 +43,7 @@ class SimpleDemo(object):
 		self._state = x
 		try:
 			self.a = -x[1] - x[0] + self.u()
-		except TypeError: 
+		except (AttributeError, TypeError): 
 			self.a = -x[1] - x[0]
 
 	def plot(self):
@@ -33,7 +51,7 @@ class SimpleDemo(object):
 		try:
 			plt.plot(self.x_out[:,0], self.x_out[:,1])
 			plt.show()
-		except:
+		except AttributeError:
 			plt.close()
 
 
@@ -73,7 +91,7 @@ class SlidingDemo(object):
 			plt.plot(x, lam)
 			plt.plot(self.x_out[:,0], self.x_out[:,1])
 			plt.show()
-		except:
+		except AttributeError:
 			plt.close()
 
 
@@ -86,7 +104,7 @@ class PID(object):
 	def __call__(self):
 		x, v = self.y()
 		error = self.r() - x
-		self._force = self.Kp*error + self.Ki*self.state - self.Kd*v
+		self._force = self.Kp*error + self.Ki*self.state[0] - self.Kd*v
 		return (error,)
 
 	def u(self):
@@ -96,10 +114,10 @@ class PID(object):
 class SubsystemDemo(object):
 	def __init__(self):
 		self.plant = SimpleDemo()
-		self.control = PID()
+		self.control = PID(Ki=1)
 		self.control.y = lambda : self.plant.state
-		self.plant.u = self.control.u
 		self.control.r = self.reference
+		self.plant.u = self.control.u
 		self.time = 0.0
 
 	@property
@@ -109,13 +127,22 @@ class SubsystemDemo(object):
 	@state.setter
 	def state(self, x):
 		self.plant.state = x[:-1]
-		self.control.state = x[-1]
+		self.control.state = (x[-1],)
+
+	def __call__(self):
+		return self.plant() + self.control()
 
 	def reference(self):
 		return 0.0 if self.time < 2.0 else 1.0
 
 	def __len__(self):
 		return 3
+
+	def plot(self):
+		self.plant.t_out = self.t_out
+		self.plant.x_out = self.x_out
+		self.plant.plot()
+		
 
 class Filter(object):
 	""" Differentiates a reference signal with a linear filter. The 
@@ -160,10 +187,7 @@ class Solver(object):
 		self.stepper = solvers.Stepper(system)
 		#Check basic requirements of a system object...
 		assert hasattr(system, 'state') 	#for setting state
-		try: 
-			system() 	#for computing derivatives
-		except: 
-			raise TypeError('system must be callable without arguments')
+		assert hasattr(system, '__call__')	#for computing derivatives
 		self.events = events is True
 		self.slide = slide is True
 		self._autonomous = not hasattr(system, 'time') 
