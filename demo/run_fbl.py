@@ -20,16 +20,22 @@
 
 import time
 import lyapunov
+#import solvers
 import motor_demo
 
-final_time = 0.003
+final_time = 8.0
 num_points = 1000
 sys = motor_demo.FBLNoObsrv()
 sys.state = (1.0,)*4+ (0.0,)*3 #motor + prefilter
 sys.time = 0.0
+sys.step_time = 0.1
 print "\nMotor with Feedback Linearization, no observer"
 print "initial state:", sys.state
-print "initial slope:", sys()
+
+#stepper = solvers.Stepper(sys)
+#stepper.step(0.01)
+#print "next state:", sys.state
+
 print "simulating for", final_time, "sec with", num_points, "points."
 start = time.clock()
 sol = lyapunov.Solver(sys, points=num_points)

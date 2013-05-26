@@ -108,11 +108,12 @@ class FBLController(object):
 		self._control_effort = u_eq + u_c
 
 
-class FBLNoObsrv:
+class FBLNoObsrv(object):
 	def __init__(self):
 		self.time = 0.0
 		self.output_labels = ['reference angle', 'filtered reference',
 							  'motor angle']
+		self.step_time = 0.001
 		#construct subsystems
 		self.plant = Motor()
 		self.controller = FBLController(self.plant)
@@ -123,7 +124,7 @@ class FBLNoObsrv:
 		self.controller.x = lambda : self.plant.state #state is a property
 		self.controller.y = self.plant.output
 		self.controller.r = self.prefilter.output
-		self.prefilter.signal  = self.reference
+		self.prefilter.signal = self.reference
 		self.plant.state = (0.0,)*4
 		self.prefilter.state = (0.0,)*len(self.prefilter)
 		self.controller()
@@ -132,9 +133,7 @@ class FBLNoObsrv:
 		return len(self.plant) + len(self.prefilter)
 
 	def __call__(self):
-		qdot = self.prefilter()
-		xdot = self.plant() 
-		return xdot + qdot
+		return self.plant() + self.prefilter()
 
 	@property
 	def state(self):
@@ -148,7 +147,7 @@ class FBLNoObsrv:
 		self.controller()
 
 	def reference(self):
-		return 0.0 if self.time < 0.001 else 2.0
+		return 0.0 if self.time < self.step_time else 2.0
 
 	@property
 	def output(self):
@@ -159,6 +158,11 @@ class FBLNoObsrv:
 		#Use descriptors for labels?
 		for i, ilabel in enumerate(self.output_labels):
 			plt.plot(self.t_out, self.y_out[:,i], label=ilabel)
+		plt.show()
+
+		plt.figure()
+		for i in range(4):
+			plt.plot(self.t_out, self.x_out[:,i])
 		plt.show()
 
 ##############################
