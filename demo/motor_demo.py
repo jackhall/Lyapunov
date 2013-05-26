@@ -124,7 +124,7 @@ class FBLNoObsrv(object):
 		self.controller.x = lambda : self.plant.state #state is a property
 		self.controller.y = self.plant.output
 		self.controller.r = self.prefilter.output
-		self.prefilter.signal = self.reference
+		self.prefilter.signal = lambda : self.reference()
 		self.plant.state = (0.0,)*4
 		self.prefilter.state = (0.0,)*len(self.prefilter)
 		self.controller()
@@ -158,12 +158,16 @@ class FBLNoObsrv(object):
 		#Use descriptors for labels?
 		for i, ilabel in enumerate(self.output_labels):
 			plt.plot(self.t_out, self.y_out[:,i], label=ilabel)
+		plt.xlabel("time (s)")
+		plt.legend()
 		plt.show()
 
 		plt.figure()
 		for i in range(4):
 			plt.plot(self.t_out, self.x_out[:,i])
+		plt.xlabel("time (s)")
 		plt.show()
+
 
 ##############################
 #FBL with observer

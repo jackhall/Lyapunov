@@ -20,6 +20,7 @@ import math
 import numpy
 import matplotlib.pyplot as plt
 import solvers
+from itertools import chain
 
 class SimpleDemo(object):
 	"""Mass spring damper system."""
@@ -111,6 +112,60 @@ class PID(object):
 		return self._force
 
 
+class CompositeSystem(object):
+	def __init__(self, sys_list):
+		self._subsystems = [(sys, hasattr(sys, "state"), hasattr(sys, "time"),
+							 hasattr(sys, "__call__")) for sys in sys_list]
+		self._num_states = sum(len(sys) for sys in self._sys_with_state())
+		self.time = 0.0
+
+	def __call__(self):
+		def sys_callable():
+			for sys, has_state, _, is_callable in self._subsystems:
+				if is_callable:
+					if has_state:
+						yield sys()
+					else:
+						sys()
+				elif has_state:
+					raise NotImplementedError("Systems with states " 
+						+ "should be callable")
+		return tuple(chain.from_iterable(sys.callable()))
+
+	@property
+	def state(self):
+		return tuple(chain.from_iterable(sys.state 
+										 for sys in self._sys_with_state()))
+
+	@state.setter
+	def state(self, x):
+		a = 0
+		for sys in self._sys_with_state():
+			b = a + len(sys)
+			sys.state = x[a:b]
+			a = b
+		assert b == self._num_states
+
+	@property
+	def time(self):
+		return self._time
+
+	@time.setter
+	def time(self, t):
+		self._time = t
+		for sys, _, has_time, _ in self._subsystems:
+			if has_time:
+				sys.time = t
+
+	def __len__(self):
+		return self._num_states
+
+	def _sys_with_state(self):
+		for sys, has_states, _, _ in self._subsystems:
+			if has_states:
+				yield sys
+	
+
 class SubsystemDemo(object):
 	def __init__(self):
 		self.plant = SimpleDemo()
@@ -143,6 +198,34 @@ class SubsystemDemo(object):
 		self.plant.x_out = self.x_out
 		self.plant.plot()
 		
+
+class StepSignal(object):
+	def __init__(self, step_time=1.0, y0=0.0, yf=1.0):
+		self.step_time, self.initial, self.final = step_time, y0, yf
+		self.time = 0.0
+
+	@property
+	def value(self):
+		return self.initial if self.time < self.step_time else self.final
+
+
+class ChirpSignal(object):
+	def __init__(self, f0, freq_fcn=None, amplitude=2.0, mean=0.0):
+		""" Frequencies are in rad/s. Instantaneous frequency is 
+			f = f0 + freq_fcn(time) """
+		self.amplitude, self.mean = amplitude, mean
+		self.f0 = f0
+		self.time = 0.0
+		if freq_fcn is None:
+			self.freq_fcn = lambda time : time
+		else:
+			self.freq_fcn = freq_fcn
+
+	@property
+	def value(self):
+		inst_freq = self.f0 * self.freq_fcn(self.time)
+		return self.mean + self.amplitude*math.sin(inst_freq*self.time)
+
 
 class Filter(object):
 	""" Differentiates a reference signal with a linear filter. The 
