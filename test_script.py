@@ -21,6 +21,7 @@
 import time
 import lyapunov
 import solvers
+import matplotlib.pyplot as plt
 
 sys = lyapunov.SimpleDemo()
 sys.time = 0.0
@@ -56,15 +57,59 @@ print "\nNo Events, No Sliding - satellite control"
 print "initial state", sys3.state
 start = time.clock()
 sys3.x_out, sys3.t_out = sol.simulate(5)
-print "time elapsed ", time.clock() - start
+print "time elapsed", time.clock() - start
 sys3.plot()
 
 sys4 = lyapunov.SubsystemDemo()
 sol = lyapunov.Solver(sys4)
 print "\nMass-Spring-Damper w/PID control"
 print "initial state", sys4.state
-state = time.clock()
+start = time.clock()
 sys4.x_out, sys4.t_out = sol.simulate(10)
-print "time elapsed ", time.clock() - start
+print "time elapsed", time.clock() - start
 sys4.plot()
+
+
+#Need a wrapper object to test lyapunov.Filter (to provide an input signal).
+class FilterDemo(object):
+	def __init__(self):
+		self.plant = lyapunov.Filter((1.0, 3.0, 3.0))
+		self.time = 0.0
+		self.plant.signal = self.reference
+		self.plant.state = (0.0,)*3
+
+	def reference(self):
+		return 0.0 if self.time < 1.0 else 1.0
+	
+	@property
+	def state(self):
+		return self.plant.state
+
+	@state.setter
+	def state(self, x):
+		self.plant.state = x
+
+	def __call__(self):
+		return self.plant()
+
+	def __len__(self):
+		return len(self.plant)
+
+	def plot(self):
+		plt.figure()
+		try:
+			plt.plot(sys5.t_out, sys5.x_out[:,0])
+			plt.show()
+		except:
+			plt.close()
+
+
+sys5 = FilterDemo()
+sol = lyapunov.Solver(sys5)
+print "\nFilter"
+print "initial state", sys5.state
+start = time.clock()
+sys5.x_out, sys5.t_out = sol.simulate(10)
+print "time elapsed", time.clock() - start
+sys5.plot()
 

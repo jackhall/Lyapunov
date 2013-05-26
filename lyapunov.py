@@ -165,6 +165,7 @@ class Filter(object):
 	@state.setter
 	def state(self, x):
 		self._state = x
+		#Compute the only nontrivial deriviative.
 		self._xndot = ( sum(-q*d for (q,d) in zip(self._state, self._gains)) 
 					  + self._gains[0]*self.signal()) 
 
@@ -175,13 +176,12 @@ class Filter(object):
 		return self._state + (self._xndot,)
 
 	def __call__(self):
-		""" Computes the only nontrivial derivative. """
 		return self._state[1:] + (self._xndot,)
 
 
 
 class Solver(object):
-	def __init__(self, system, events=False, slide=True, min_ratio=.01, 
+	def __init__(self, system, events=False, min_ratio=.01, 
 			     points=100): 
 		self.system = system
 		self.stepper = solvers.Stepper(system)
@@ -189,7 +189,6 @@ class Solver(object):
 		assert hasattr(system, 'state') 	#for setting state
 		assert hasattr(system, '__call__')	#for computing derivatives
 		self.events = events is True
-		self.slide = slide is True
 		self._autonomous = not hasattr(system, 'time') 
 		self.points = points #number of points recorded/plotted
 		self.min_ratio = min_ratio
