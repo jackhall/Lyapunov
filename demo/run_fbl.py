@@ -23,12 +23,28 @@ import lyapunov
 #import solvers
 import motor_demo
 
+step_time = 0.1
+#Construct subsystems.
+plant = motor_demo.Motor()
+reference = lyapunov.StepSignal(step_time=step_time, final=2.0)
+controller = motor_demo.FBLController(self.plant)
+prefilter = lyapunov.Filter((244, 117.2, 18.75))
+#Connect subsystems.
+plant.u = controller.u
+#no disturbance yet		self.plant.d.link_to
+controller.x = lambda : plant.state  #state is a property
+controller.y = plant.output
+controller.r = prefilter.output
+prefilter.signal = lambda : reference.value
+plant.state = (1.0,)*4
+prefilter.state = (0.0,)*len(self.prefilter)
+sys = lyapunov.CompositeSystem([reference, prefilter, controller, plant])
+
+output_labels = ['reference angle', 'filtered reference',
+					  'motor angle']
+
 final_time = 8.0
 num_points = 1000
-sys = motor_demo.FBLNoObsrv()
-sys.state = (1.0,)*4+ (0.0,)*3 #motor + prefilter
-sys.time = 0.0
-sys.step_time = 0.1
 print "\nMotor with Feedback Linearization, no observer"
 print "initial state:", sys.state
 
@@ -42,5 +58,6 @@ sol = lyapunov.Solver(sys, points=num_points)
 sys.x_out, sys.y_out, sys.t_out = sol.simulate(final_time)
 print "final state:", sol.x_out[-1]
 print "elapsed time =", time.clock() - start
+#write plotting function
 sys.plot()
 

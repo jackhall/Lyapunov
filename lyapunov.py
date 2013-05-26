@@ -115,8 +115,8 @@ class PID(object):
 class CompositeSystem(object):
 	def __init__(self, sys_list):
 		self._subsystems = list(sys_list)
-		self._have_state = [hasattr(sys, "state") for sys in sys_list]
-		self._have_time = [hasattr(sys, "time") for sys in sys_list]
+		self._have_state = [self.has_state(sys) for sys in sys_list]
+		self._have_time = [self.has_time(sys) for sys in sys_list]
 		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
 		self._num_states = sum(len(sys) for sys in 
 							compress(sys_list, self._have_state))
@@ -128,7 +128,8 @@ class CompositeSystem(object):
 
 	def __call__(self):
 		call_iter = compress(self._subsystems, self._are_callable)
-		return tuple(chain.from_iterable(imap(lambda sys : sys(), call_iter)))
+		return tuple(chain.from_iterable(
+					 imap(lambda sys : sys(), call_iter)))
 
 	@property
 	def state(self):
@@ -157,6 +158,40 @@ class CompositeSystem(object):
 
 	def __len__(self):
 		return self._num_states
+		
+	@staticmethod
+	def has_state(sys):
+		try:
+			sys.state
+			return True
+		except AttributeError:
+			return False	
+
+	@staticmethod
+	def has_time(sys):
+		try:
+			sys.time
+			return True
+		except AttributeError:
+			return False
+
+	def replace_subsystem(self, index, new_system):
+		self._subsystems[index] = new_system
+		self._have_state[index] = self.has_state(new_system)
+		self._have_time[index] = self.has_time(new_system)
+		self._are_callable[index] = hasattr(new_system, "__call__")
+
+	def add_subsystem(self, index, new_system):
+		self._subsystems.insert(index, new_system)
+		self._have_state.insert(index, self.has_state(new_system))
+		self._have_time.insert(index, self.has_time(new_system))
+		self._are_callable.insert(index, hasattr(new_system, "__call__"))
+
+	def remove_subsystem(self, index):
+		self._subsystems.pop(index)
+		self._have_state.pop(index)
+		self._have_time.pop(index)
+		self._are_callable.pop(index)
 
 
 class SubsystemDemo(object):
