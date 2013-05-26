@@ -20,7 +20,7 @@ import math
 import numpy
 import matplotlib.pyplot as plt
 import solvers
-from itertools import chain
+from itertools import chain, compress, imap
 
 class SimpleDemo(object):
 	"""Mass spring damper system."""
@@ -114,33 +114,32 @@ class PID(object):
 
 class CompositeSystem(object):
 	def __init__(self, sys_list):
-		self._subsystems = [(sys, hasattr(sys, "state"), hasattr(sys, "time"),
-							 hasattr(sys, "__call__")) for sys in sys_list]
-		self._num_states = sum(len(sys) for sys in self._sys_with_state())
+		self._subsystems = list(sys_list)
+		self._have_state = [hasattr(sys, "state") for sys in sys_list]
+		self._have_time = [hasattr(sys, "time") for sys in sys_list]
+		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
+		self._num_states = sum(len(sys) for sys in 
+							compress(sys_list, self._have_state))
 		self.time = 0.0
+		for has_state, can_call in zip(self._have_state, self._are_callable):
+			if has_state and not can_call:
+				raise NotImplementedError("Systems with states " 
+						+ "should be callable")
 
 	def __call__(self):
-		def sys_callable():
-			for sys, has_state, _, is_callable in self._subsystems:
-				if is_callable:
-					if has_state:
-						yield sys()
-					else:
-						sys()
-				elif has_state:
-					raise NotImplementedError("Systems with states " 
-						+ "should be callable")
-		return tuple(chain.from_iterable(sys.callable()))
+		call_iter = compress(self._subsystems, self._are_callable)
+		return tuple(chain.from_iterable(imap(lambda sys : sys(), call_iter)))
 
 	@property
 	def state(self):
-		return tuple(chain.from_iterable(sys.state 
-										 for sys in self._sys_with_state()))
+		state_iter = compress(self._subsystems, self._have_state)
+		return tuple(chain.from_iterable(
+					 imap(lambda sys : sys.state, state_iter)))
 
 	@state.setter
 	def state(self, x):
 		a = 0
-		for sys in self._sys_with_state():
+		for sys in compress(self._subsystems, self._have_state):
 			b = a + len(sys)
 			sys.state = x[a:b]
 			a = b
@@ -153,18 +152,12 @@ class CompositeSystem(object):
 	@time.setter
 	def time(self, t):
 		self._time = t
-		for sys, _, has_time, _ in self._subsystems:
-			if has_time:
-				sys.time = t
+		for sys in compress(self._subsystems, self._have_time):
+			sys.time = t
 
 	def __len__(self):
 		return self._num_states
 
-	def _sys_with_state(self):
-		for sys, has_states, _, _ in self._subsystems:
-			if has_states:
-				yield sys
-	
 
 class SubsystemDemo(object):
 	def __init__(self):
@@ -262,15 +255,15 @@ class Filter(object):
 		return self._state[1:] + (self._xndot,)
 
 
-
 class Solver(object):
 	def __init__(self, system, events=False, min_ratio=.01, 
 			     points=100): 
 		self.system = system
 		self.stepper = solvers.Stepper(system)
 		#Check basic requirements of a system object...
-		assert hasattr(system, 'state') 	#for setting state
-		assert hasattr(system, '__call__')	#for computing derivatives
+		system.state #to raise an exception if state is not an attribute
+		if not hasattr(system, '__call__'):
+			raise AttributeError("Need to compute state derivatives")
 		self.events = events is True
 		self._autonomous = not hasattr(system, 'time') 
 		self.points = points #number of points recorded/plotted
