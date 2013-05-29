@@ -117,27 +117,11 @@ class CompositeSystem(object):
 	def __init__(self, sys_list):
 		self._subsystems = list(sys_list) #just use an OrderedDict!
 		self._have_state = map(self.has_state, sys_list)
-		self._have_time = map(self.has_time, sys_list]
+		self._have_time = map(self.has_time, sys_list)
 		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
 		self._num_states = sum(len(sys) for sys in 
 							compress(sys_list, self._have_state))
 		self.time = 0.0
-		#Build a list of new attributes based on optionally-defined sys.name.
-		attributes = [] 
-		for i, sys in enumerate(self._subsystems):
-			try:
-				name = sys.name
-			except AttributeError:
-				name = "_" + str(i) #placeholder
-			else: 
-				if name in attributes: 
-					j = attributes.index(name)
-					attributes[j] = "_" + str(j) #retroactive
-					name = "_" + str(i)
-			attributes.append(name)
-		#Add these attributes to self.
-		for i, attr in enumerate(attributes):
-			setattr(self, attr, self._subsystems[i])
 		#Check to make sure that any system that has state is callable.
 		for has_state, can_call in zip(self._have_state, self._are_callable):
 			if has_state and not can_call:
@@ -146,6 +130,7 @@ class CompositeSystem(object):
 
 	def __call__(self):
 		call_iter = compress(self._subsystems, self._are_callable)
+		#NoneType error when call_iter is used?
 		return tuple(chain.from_iterable(
 					 imap(lambda sys : sys(), call_iter)))
 
@@ -154,6 +139,10 @@ class CompositeSystem(object):
 		state_iter = compress(self._subsystems, self._have_state)
 		return tuple(chain.from_iterable(
 					 imap(lambda sys : sys.state, state_iter)))
+
+	@property
+	def subsystems(self):
+		return list(self._subsystems)
 
 	@state.setter
 	def state(self, x):
@@ -356,13 +345,14 @@ class Solver(object):
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 		if self._autonomous:
 		 	del self.system.time
-		try:
-			self.compute_output()
-			return (numpy.array(self.x_out), 
-					numpy.array(self.y_out), 
-					numpy.array(self.t_out))
-		except AttributeError: 
-			return numpy.array(self.x_out), numpy.array(self.t_out)
+		return numpy.array(self.x_out), numpy.array(self.t_out)
+		#try:
+		#	self.compute_output()
+		#	return (numpy.array(self.x_out), 
+		#			numpy.array(self.y_out), 
+		#			numpy.array(self.t_out))
+		#except AttributeError: 
+		#	return numpy.array(self.x_out), numpy.array(self.t_out)
 	
 	def compute_output(self):
 		self.y_out = []

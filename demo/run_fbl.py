@@ -26,37 +26,11 @@ import lyapunov
 import motor_demo
 
 
-class Plotter(object):
-	def __init__(self, output_labels, state_labels):
-		self.output_labels = ['reference angle', 'filtered reference',
-							  'motor angle']
-		self.state_labels = ['stator current', 'rotor current', 
-							 'angular velocity', 'angle']
-
-	def plot_outputs(self):
-		plt.figure()
-		for i, ilabel in enumerate(output_labels):
-			plt.plot(self.t_out, self.y_out[:,i], label=ilabel)
-		plt.xlabel("time (s)")
-		plt.title("states")
-		plt.legend()
-		plt.show()
-
-	def plot_states(self):
-		plt.figure()
-		for i, ilabel in enumerate(state_labels):
-			plt.plot(self.t_out, self.x_out[:,i], label=ilabel)
-		plt.xlabel("time (s)")
-		plt.title("states")
-		plt.legend()
-		plt.show()
-
-
 step_time = 0.1
 #Construct subsystems.
 plant = motor_demo.Motor()
-reference = lyapunov.StepSignal(step_time=step_time, final=2.0)
-controller = motor_demo.FBLController(self.plant)
+reference = lyapunov.StepSignal(step_time=step_time, yf=2.0)
+controller = motor_demo.FBLController(plant)
 prefilter = lyapunov.Filter((244, 117.2, 18.75))
 #Connect subsystems.
 plant.u = controller.u
@@ -66,7 +40,7 @@ controller.y = plant.output
 controller.r = prefilter.output
 prefilter.signal = lambda : reference.value
 plant.state = (1.0,)*4
-prefilter.state = (0.0,)*len(self.prefilter)
+prefilter.state = (0.0,)*len(prefilter)
 sys = lyapunov.CompositeSystem([reference, prefilter, controller, plant])
 
 
@@ -80,8 +54,30 @@ print "initial state:", sys.state
 print "simulating for", final_time, "sec with", num_points, "points."
 start = time.clock()
 sol = lyapunov.Solver(sys, points=num_points)
-x_out, y_out, t_out = sol.simulate(final_time)
+x_out, t_out = sol.simulate(final_time)
 print "final state:", sol.x_out[-1]
 print "elapsed time =", time.clock() - start
-plot_motor(t_out, x_out)
+
+
+labels = {'reference angle': lambda : reference.value,
+		  'filtered angle': lambda : prefilter.state[0],
+		  'motor_angle': lambda : plant.state[3]}
+lines = dict.fromkeys(labels.iterkeys(), [])
+#Reconstruct labeled variables.
+for x, t in zip(sol.x_out, sol.t_out):
+	sys.state = x
+	sys.time = t
+	for label, f in labels.iteritems():
+		lines[label].append(f())
+#Convert to a plottable form.
+for label, data in lines.iteritems():
+	lines[label] = numpy.array(data)
+#Plot.
+plt.figure()
+for label, data in lines.iteritems():
+	plt.plot(t_out, data, label=label)
+plt.xlabel("time (s)")
+plt.title("angles")
+plt.legend()
+plt.show()
 
