@@ -17,10 +17,11 @@
 #The author may be reached at jackhall@utexas.edu.
 
 import math
+from itertools import chain, compress, imap
+import operator
 import numpy
 import matplotlib.pyplot as plt
 import solvers
-from itertools import chain, compress, imap
 
 class SimpleDemo(object):
 	"""Mass spring damper system."""
@@ -114,13 +115,30 @@ class PID(object):
 
 class CompositeSystem(object):
 	def __init__(self, sys_list):
-		self._subsystems = list(sys_list)
-		self._have_state = [self.has_state(sys) for sys in sys_list]
-		self._have_time = [self.has_time(sys) for sys in sys_list]
+		self._subsystems = list(sys_list) #just use an OrderedDict!
+		self._have_state = map(self.has_state, sys_list)
+		self._have_time = map(self.has_time, sys_list]
 		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
 		self._num_states = sum(len(sys) for sys in 
 							compress(sys_list, self._have_state))
 		self.time = 0.0
+		#Build a list of new attributes based on optionally-defined sys.name.
+		attributes = [] 
+		for i, sys in enumerate(self._subsystems):
+			try:
+				name = sys.name
+			except AttributeError:
+				name = "_" + str(i) #placeholder
+			else: 
+				if name in attributes: 
+					j = attributes.index(name)
+					attributes[j] = "_" + str(j) #retroactive
+					name = "_" + str(i)
+			attributes.append(name)
+		#Add these attributes to self.
+		for i, attr in enumerate(attributes):
+			setattr(self, attr, self._subsystems[i])
+		#Check to make sure that any system that has state is callable.
 		for has_state, can_call in zip(self._have_state, self._are_callable):
 			if has_state and not can_call:
 				raise NotImplementedError("Systems with states " 
