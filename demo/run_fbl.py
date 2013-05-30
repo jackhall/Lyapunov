@@ -18,7 +18,9 @@
 #
 #The author may be reached at jackhall@utexas.edu.
 
+import pdb
 import time
+import numpy
 import matplotlib.pyplot as plt
 from itertools import izip
 import lyapunov
@@ -44,6 +46,12 @@ prefilter.state = (0.0,)*len(prefilter)
 sys = lyapunov.CompositeSystem([reference, prefilter, controller, plant])
 
 
+labels = {'reference angle': lambda : reference.value,
+		  'filtered angle': lambda : prefilter.state[0],
+		  'motor angle': lambda : plant.state[3]}
+plotter = lyapunov.Plotter(sys, labels)
+
+
 final_time = 8.0
 num_points = 1000
 print "\nMotor with Feedback Linearization, no observer"
@@ -53,31 +61,14 @@ print "initial state:", sys.state
 #print "next state:", sys.state
 print "simulating for", final_time, "sec with", num_points, "points."
 start = time.clock()
-sol = lyapunov.Solver(sys, points=num_points)
-x_out, t_out = sol.simulate(final_time)
+sol = lyapunov.Solver(sys, points=num_points, plotter=plotter)
+plotter.x, plotter.t = sol.simulate(final_time)
 print "final state:", sol.x_out[-1]
 print "elapsed time =", time.clock() - start
+plotter.time_response()
 
-
-labels = {'reference angle': lambda : reference.value,
-		  'filtered angle': lambda : prefilter.state[0],
-		  'motor_angle': lambda : plant.state[3]}
-lines = dict.fromkeys(labels.iterkeys(), [])
-#Reconstruct labeled variables.
-for x, t in zip(sol.x_out, sol.t_out):
-	sys.state = x
-	sys.time = t
-	for label, f in labels.iteritems():
-		lines[label].append(f())
-#Convert to a plottable form.
-for label, data in lines.iteritems():
-	lines[label] = numpy.array(data)
-#Plot.
 plt.figure()
-for label, data in lines.iteritems():
-	plt.plot(t_out, data, label=label)
-plt.xlabel("time (s)")
-plt.title("angles")
-plt.legend()
+plt.plot(numpy.array(plotter.t), numpy.array(plotter.x)[:,-1])
 plt.show()
 
+pdb.set_trace()

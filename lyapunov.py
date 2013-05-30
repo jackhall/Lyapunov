@@ -132,7 +132,13 @@ class CompositeSystem(object):
 		call_iter = compress(self._subsystems, self._are_callable)
 		#NoneType error when call_iter is used?
 		return tuple(chain.from_iterable(
-					 imap(lambda sys : sys(), call_iter)))
+					 imap(self._eval_systems, call_iter)))
+
+	@staticmethod
+	def _eval_systems(sys):
+		"""For calling systems."""
+		derivative = sys()
+		return derivative if derivative is not None else ()
 
 	@property
 	def state(self):
@@ -299,8 +305,9 @@ class Filter(object):
 
 class Solver(object):
 	def __init__(self, system, events=False, min_ratio=.01, 
-			     points=100): 
+			     points=100, plotter=None): 
 		self.system = system
+		self.plotter = plotter
 		self.stepper = solvers.Stepper(system)
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
@@ -340,6 +347,8 @@ class Solver(object):
 										   step_size*self.min_ratio);
 					current_mode = str(self.system.mode)
 			#Record for output.
+			if self.plotter is not None:
+				self.plotter.update()
 			self.x_out.append(self.system.state)
 			self.t_out.append(self.system.time)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
@@ -361,7 +370,48 @@ class Solver(object):
 			self.y_out.append(self.system.output)
 		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
 
-	
+
+class Plotter(object):
+	def __init__(self, system, labels):
+		self.system = system
+		self.labels = labels
+		self.lines = dict.fromkeys(labels.iterkeys(), [])
+		self.time = []
+
+	def update(self):
+		self.time.append(self.system.time)
+		for label, f in self.labels.iteritems():
+			self.lines[label].append(f())
+
+	def clear(self):
+		self.time = []
+		for label in self.lines:
+			self.lines[label] = []
+
+	def time_response(self):
+		plt.figure()
+		for label, data in self.lines.iteritems():
+			plt.plot(self.time, numpy.array(data), label=label)
+		plt.xlabel("time (s)")
+		plt.legend()
+		plt.show()
+
+	def phase_portrait(self, xlabel, ylabel):
+		plt.figure()
+		plt.plot(numpy.array(self.lines[xlabel]), 
+				 numpy.array(self.lines[ylabel]))
+		plt.xlabel(xlabel)
+		plt.ylabel(ylabel)
+		plt.show()
+
+	def reconstruct(self, solver):
+		self.clear()
+		for x, t in zip(solver.x_out, solver.t_out):
+			self.system.state = x
+			self.system.time = t
+			self.update()		
+
+
 	#def phase_portrait(self):
 	#	#Number of arrows per dimension=20 is arbitrary but works well.
 	#	assert len(self.system) == 2
