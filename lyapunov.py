@@ -17,6 +17,7 @@
 #The author may be reached at jackhall@utexas.edu.
 
 import math
+import pdb
 from itertools import chain, compress, imap
 import operator
 import numpy
@@ -380,6 +381,7 @@ class Plotter(object):
 
 	def update(self):
 		self.time.append(self.system.time)
+		pdb.set_trace()
 		for label, f in self.labels.iteritems():
 			self.lines[label].append(f())
 
