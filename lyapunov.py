@@ -376,12 +376,11 @@ class Plotter(object):
 	def __init__(self, system, labels):
 		self.system = system
 		self.labels = labels
-		self.lines = dict.fromkeys(labels.iterkeys(), [])
+		self.lines = {label: [] for label in labels.iterkeys()}
 		self.time = []
 
 	def update(self):
 		self.time.append(self.system.time)
-		pdb.set_trace()
 		for label, f in self.labels.iteritems():
 			self.lines[label].append(f())
 
