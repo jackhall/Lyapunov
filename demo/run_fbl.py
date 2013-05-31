@@ -65,10 +65,10 @@ sol = lyapunov.Solver(sys, points=num_points, plotter=plotter)
 plotter.x, plotter.t = sol.simulate(final_time)
 print "final state:", sol.x_out[-1]
 print "elapsed time =", time.clock() - start
-plotter.time_response()
+pdb.set_trace()
+plotter.time_response() #all lines look the same - wrong concatenation
 
 plt.figure()
 plt.plot(numpy.array(plotter.t), numpy.array(plotter.x)[:,-1])
 plt.show()
 
-pdb.set_trace()
