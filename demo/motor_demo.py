@@ -114,8 +114,7 @@ class FBLController(object):
 class Observer(object):
 	def __init__(self, plant):
 		self.plant = plant
-		self.state = 0.0, 0.0, 0.0, 0.0
-		self.Lmax = 100.0 #this value is arbitrary
+		self.Lmax = 1000.0 #this value is arbitrary
 		self.y = self.u = None
 
 	@property
@@ -127,23 +126,28 @@ class Observer(object):
 		self._state = xhat
 		x1, x2, x3, x4 = xhat
 		#computing observer gains...
-		epsilon = 0.001	#a small number to prevent division by zero
+		epsilon = 1	#a small number to prevent division by zero
 		p = self.plant
 		L4 = 25 - p.b - p.beta - p.alpha
 		L3 = p.alpha*L4 + p.a*p.b*p.c*p.beta*x1**2 - 234
-		L1 = ((1526 - (L3 + (p.b + p.beta)*L4 + (L4 
-			+ (p.alpha - 1))*p.alpha*p.beta*p.a*p.b*p.c*x1**2)*p.alpha**2) 
-			/ (p.c*(p.a*x1*x3 + x2*(p.alpha+p.beta)) + epsilon))
+		den = p.c*(p.a*x1*x3 + x2*(p.alpha+p.beta)) 
+		den = den if den != 0.0 else epsilon
+		L1 = ((1526 - (L3 + (p.b + p.beta)*L4 + (L4 + (p.alpha - 1))
+			 * p.alpha*p.beta*p.a*p.b*p.c*x1**2)*p.alpha**2) / den)
+		den = p.c*x1 if x1 != 0.0 else epsilon
 		L2 = ((-(p.alpha + p.beta)*L3 + p.alpha*L4*(p.b + p.beta) 
-			+ (L4 + p.alpha)*p.beta*p.a*p.b*p.c*x1**2 - p.c*x2*L1 - 997) 
-			/ (p.c*x1 + epsilon))
+			+ (L4 + p.alpha)*p.beta*p.a*p.b*p.c*x1**2 - p.c*x2*L1 - 997) / den)
 		#Set maximum gains! Otherwise they'll blow up when your estimated
 		#system loses observability. This is also fixed with epsilon as above.
-		#L1 = L1 if L1 < self.Lmax else self.Lmax
-		#L2 = L2 if L2 < self.Lmax else self.Lmax
+		L1 = L1 if abs(L1) < self.Lmax else (self.Lmax if L1>0 else -self.Lmax)
+		L2 = L2 if abs(L2) < self.Lmax else (self.Lmax if L2>0 else -self.Lmax)
+		L3 = L3 if abs(L3) < self.Lmax else (self.Lmax if L3>0 else -self.Lmax)
 		self._gains = L1, L2, L3, L4
 		#computing estimated output...
 		self._output = self.plant.h_complete(xhat)
+
+	def __len__(self):
+		return 4
 
 	def output(self):
 		return self._output
@@ -152,7 +156,7 @@ class Observer(object):
 		xdot = self.plant.f(self._state, self.u(), 0.0)
 		output_error = self.y()[0] - self._state[3] 
 		return tuple(
-			[xidot + output_error*L for (xidot, L) in zip(xdot, self._gains)] )
+			[xidot - output_error*L for (xidot, L) in zip(xdot, self._gains)])
 
 
 class SMController(object):
@@ -220,7 +224,7 @@ else:
 	controller.x = lambda : observer.state
 	observer.y = plant.output
 	observer.u = controller.u
-	observer.state = (0.3)*4 #randomize?
+	observer.state = (0.3,)*4 #randomize?
 	labels['observed angle'] = lambda : observer.state[3]
 	sys = lyapunov.CompositeSystem([reference, prefilter, 
 									controller, plant, observer])

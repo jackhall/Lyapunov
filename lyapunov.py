@@ -341,6 +341,9 @@ class Solver(object):
 		#main solver loop
 		while self.system.time < final_time:
 			self.stepper.step(step_size)
+			if True in map(math.isnan, self.system.state):
+				print "System state is NaN!"
+				pdb.set_trace()
 			if self.events is True:
 				#Detect an event - defined as a change in system.mode.
 				if self.system.mode != current_mode:
