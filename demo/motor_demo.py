@@ -188,7 +188,7 @@ class SMController(object):
 #		self.controller.y = self.plant.output
 #		self.controller.x = lambda : self.observer.state
 
-step_time = 0.1
+step_time = 2
 #Construct subsystems.
 plant = Motor()
 reference = lyapunov.StepSignal(step_time=step_time, yf=2.0)
