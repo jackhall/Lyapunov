@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 #Lyapunov: a library for integrating nonlinear dynamical systems
 #Copyright (C) 2013  John Wendell Hall
 #
@@ -16,12 +18,13 @@
 #
 #The author may be reached at jackhall@utexas.edu.
 
+import sys
 import matplotlib.pyplot as plt
+import time
+import numpy
+from itertools import izip
 import pdb
 import lyapunov
-
-###########################
-#FBL on motor without observer
 
 class Motor(object):
 	def __init__(self):
@@ -108,70 +111,6 @@ class FBLController(object):
 		self._control_effort = u_eq + u_c
 
 
-class FBLNoObsrv(object):
-	def __init__(self):
-		self.time = 0.0
-		self.output_labels = ['reference angle', 'filtered reference',
-							  'motor angle']
-		self.step_time = 0.001
-		#construct subsystems
-		self.plant = Motor()
-		self.controller = FBLController(self.plant)
-		self.prefilter = lyapunov.Filter((244, 117.2, 18.75))
-		#link statements to connect subsystems
-		self.plant.u = self.controller.u
-		#no disturbance yet		self.plant.d.link_to
-		self.controller.x = lambda : self.plant.state #state is a property
-		self.controller.y = self.plant.output
-		self.controller.r = self.prefilter.output
-		self.prefilter.signal = lambda : self.reference()
-		self.plant.state = (0.0,)*4
-		self.prefilter.state = (0.0,)*len(self.prefilter)
-		self.controller()
-
-	def __len__(self):
-		return len(self.plant) + len(self.prefilter)
-
-	def __call__(self):
-		return self.plant() + self.prefilter()
-
-	@property
-	def state(self):
-		return self.plant.state + self.prefilter.state
-
-	@state.setter
-	def state(self, x):
-		n = len(self.plant)
-		self.plant.state = x[:n]
-		self.prefilter.state = x[n:]
-		self.controller()
-
-	def reference(self):
-		return 0.0 if self.time < self.step_time else 2.0
-
-	@property
-	def output(self):
-		return (self.reference(), self.prefilter.state[0], self.plant.output()[0])
-
-	def plot(self):
-		plt.figure()
-		#Use descriptors for labels?
-		for i, ilabel in enumerate(self.output_labels):
-			plt.plot(self.t_out, self.y_out[:,i], label=ilabel)
-		plt.xlabel("time (s)")
-		plt.legend()
-		plt.show()
-
-		plt.figure()
-		for i in range(4):
-			plt.plot(self.t_out, self.x_out[:,i])
-		plt.xlabel("time (s)")
-		plt.show()
-
-
-##############################
-#FBL with observer
-
 class Observer(object):
 	def __init__(self, plant):
 		self.plant = plant
@@ -216,46 +155,6 @@ class Observer(object):
 			[xidot + output_error*L for (xidot, L) in zip(xdot, self._gains)] )
 
 
-class FBLObsrv(FBLNoObsrv):
-	def __init__(self):
-		FBLNoObsrv.__init__(self)
-		self.observer = Observer(self.plant)
-		self.controller.x = lambda : self.observer.state
-		self.observer.y = self.plant.output
-		self.observer.u = self.controller.u 
-		#disturbance is still assumed to be zero
-		self.output_labels.append('estimated angle')
-
-	def __len__(self):
-		return len(self.plant) + len(self.prefilter) + len(self.observer)
-	
-	def __call__(self):
-		qdot = self.prefilter()
-		xhatdot = self.observer()
-		xdot = self.plant() 
-		return xdot + qdot + xhatdot
-
-	@FBLNoObsrv.state.getter
-	def state(self):
-		return self.plant.state + self.prefilter.state + self.observer.state
-
-	@FBLNoObsrv.state.setter
-	def state(self, x):
-		n = len(self.plant)
-		m = len(self.prefilter)
-		self.plant.state = x[:n]
-		self.prefilter.state = x[n:(n+m)]
-		self.observer.state = x[(n+m):]
-		self.controller()
-
-	@property
-	def output(self):
-		return (self.reference(), self.prefilter.state[0], 
-				self.plant.output[0], self.observer.output[0]) 
-
-############################
-#Sliding mode control - with observer
-
 class SMController(object):
 	"""sliding mode control"""
 	def __init__(self, plant, eta_value):
@@ -276,12 +175,69 @@ class SMController(object):
 		return u_eq + u_d
 
 
-class SMCObsrv(FBLObsrv):
-	def __init__(self):
-		FBLObsrv.__init__(self)
-		self.controller = SMController(self.plant)
-		self.plant.u = self.observer.u = self.controller.u
-		self.controller.r = self.prefilter.output
-		self.controller.y = self.plant.output
-		self.controller.x = lambda : self.observer.state
+#class SMCObsrv(FBLObsrv):
+#	def __init__(self):
+#		FBLObsrv.__init__(self)
+#		self.controller = SMController(self.plant)
+#		self.plant.u = self.observer.u = self.controller.u
+#		self.controller.r = self.prefilter.output
+#		self.controller.y = self.plant.output
+#		self.controller.x = lambda : self.observer.state
+
+step_time = 0.1
+#Construct subsystems.
+plant = Motor()
+reference = lyapunov.StepSignal(step_time=step_time, yf=2.0)
+if "fbl" in sys.argv:
+	controller = FBLController(plant)
+	print "Feedback Linearizing control"
+elif "smc" in sys.argv:
+	controller = SMController(plant)
+	print "Sliding Mode control"
+else:
+	raise RuntimeError("Define a controller! (fbl or smc)")
+prefilter = lyapunov.Filter((244, 117.2, 18.75))
+
+#Connect subsystems
+plant.u = controller.u
+#no disturbance yet		self.plant.d.link_to
+controller.y = plant.output
+controller.r = prefilter.output
+prefilter.signal = lambda : reference.value #value is a property
+labels = {'reference angle': lambda : reference.value,
+		  'filtered angle': lambda : prefilter.state[0],
+		  'motor angle': lambda : plant.state[3]}
+plant.state = (1.0,)*4 #randomize?
+prefilter.state = (0.0,)*len(prefilter)
+
+if "observe" not in sys.argv:
+	controller.x = lambda : plant.state  
+	sys = lyapunov.CompositeSystem([reference, prefilter, 
+									controller, plant])
+	print "no observer"
+else:
+	observer = Observer(plant)
+	controller.x = lambda : observer.state
+	observer.y = plant.output
+	observer.u = controller.u
+	observer.state = (0.3)*4 #randomize?
+	labels['observed angle'] = lambda : observer.state[3]
+	sys = lyapunov.CompositeSystem([reference, prefilter, 
+									controller, plant, observer])
+	print "with observer"
+
+plotter = lyapunov.Plotter(sys, labels)
+final_time = 8.0
+num_points = 1000
+print "initial state:", sys.state
+#stepper = solvers.Stepper(sys)
+#stepper.step(0.01)
+#print "next state:", sys.state
+print "simulating for", final_time, "sec with", num_points, "points."
+start = time.clock()
+sol = lyapunov.Solver(sys, points=num_points, plotter=plotter)
+plotter.x, plotter.t = sol.simulate(final_time)
+print "final state:", sol.x_out[-1]
+print "elapsed time =", time.clock() - start
+plotter.time_response() 
 
