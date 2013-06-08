@@ -251,6 +251,30 @@ class StepSignal(object):
 		return self.initial if self.time < self.step_time else self.final
 
 
+class SquareWave(object):
+	def __init__(self, period=1.0, y_lower=-1.0, y_upper=1.0):
+		"""frequency is measured in Hz"""
+		self.period, self.lower, self.upper = period, y_lower, y_upper
+		self.time = 0.0
+
+	@property
+	def value(self):
+		return self.upper if self.time % self.period < 0.5 else self.lower
+
+
+class SineWave(object):
+	def __init__(self, frequency=1.0, mean=0.0, amplitude=1.0, phase=0.0):
+		""" Frequency is in rad/s. """
+		self.frequency, self.phase = frequency, phase
+		self.mean, self.amplitude = mean, amplitude
+		self.time = 0.0
+	
+	@property
+	def value(self):
+		return self.amplitude*math.sin(self.frequency*self.time 
+				+ self.phase) + self.mean
+
+
 class ChirpSignal(object):
 	def __init__(self, f0, freq_fcn=None, amplitude=2.0, mean=0.0):
 		""" Frequencies are in rad/s. Instantaneous frequency is 

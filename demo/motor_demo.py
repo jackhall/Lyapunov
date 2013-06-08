@@ -211,7 +211,7 @@ prefilter.signal = lambda : reference.value #value is a property
 labels = {'reference angle': lambda : reference.value,
 		  'filtered angle': lambda : prefilter.state[0],
 		  'motor angle': lambda : plant.state[3]}
-plant.state = (1.0,)*4 #randomize?
+plant.state = (1.0, 1.0, 0.0, 3.0) #randomize?
 prefilter.state = (0.0,)*len(prefilter)
 
 if "observe" not in sys.argv:
@@ -224,7 +224,7 @@ else:
 	controller.x = lambda : observer.state
 	observer.y = plant.output
 	observer.u = controller.u
-	observer.state = (0.3,)*4 #randomize?
+	observer.state = (-0.3,)*4 #randomize?
 	labels['observed angle'] = lambda : observer.state[3]
 	sys = lyapunov.CompositeSystem([reference, prefilter, 
 									controller, plant, observer])
