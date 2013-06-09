@@ -188,10 +188,27 @@ class SMController(object):
 #		self.controller.y = self.plant.output
 #		self.controller.x = lambda : self.observer.state
 
-step_time = 2
+#Choose input function
+if "step" in sys.argv:
+	final_time = 8.0
+	num_points = 1000
+	reference = lyapunov.StepSignal(step_time=2.0, yf=2.0)
+elif "squarewave" in sys.argv:
+	final_time = 30.0
+	num_points = 3000
+	reference = lyapunov.SquareWave(period=10.0, y_lower=-1.0, y_upper=1.0)
+elif "chirp" in sys.argv:
+	final_time = 60.0
+	num_points = 6000
+	reference = lyapunov.ChirpSignal(f0=0.05, freq_fcn=lambda t:0.2*t)
+else:
+	print "defaulting control signal to regulation"
+	final_time = 8.0
+	num_points = 1000
+	reference = lyapunov.StepSignal(step_time=final_time+1)
+
 #Construct subsystems.
 plant = Motor()
-reference = lyapunov.StepSignal(step_time=step_time, yf=2.0)
 if "fbl" in sys.argv:
 	controller = FBLController(plant)
 	print "Feedback Linearizing control"
@@ -211,12 +228,12 @@ prefilter.signal = lambda : reference.value #value is a property
 labels = {'reference angle': lambda : reference.value,
 		  'filtered angle': lambda : prefilter.state[0],
 		  'motor angle': lambda : plant.state[3]}
-plant.state = (1.0, 1.0, 0.0, 3.0) #randomize?
+plant.state = (1.0, 1.0, 0.0, -1.0) #randomize?
 prefilter.state = (0.0,)*len(prefilter)
 
 if "observe" not in sys.argv:
 	controller.x = lambda : plant.state  
-	sys = lyapunov.CompositeSystem([reference, prefilter, 
+	system = lyapunov.CompositeSystem([reference, prefilter, 
 									controller, plant])
 	print "no observer"
 else:
@@ -224,24 +241,40 @@ else:
 	controller.x = lambda : observer.state
 	observer.y = plant.output
 	observer.u = controller.u
-	observer.state = (-0.3,)*4 #randomize?
+	observer.state = (0.3,)*4 #randomize?
 	labels['observed angle'] = lambda : observer.state[3]
-	sys = lyapunov.CompositeSystem([reference, prefilter, 
+	system = lyapunov.CompositeSystem([reference, prefilter, 
 									controller, plant, observer])
 	print "with observer"
 
-plotter = lyapunov.Plotter(sys, labels)
-final_time = 8.0
-num_points = 1000
-print "initial state:", sys.state
+#Configure plotter
+plotter = lyapunov.Plotter(system, labels)
+
+#Simulate
+print "initial state:", system.state
 #stepper = solvers.Stepper(sys)
 #stepper.step(0.01)
 #print "next state:", sys.state
 print "simulating for", final_time, "sec with", num_points, "points."
 start = time.clock()
-sol = lyapunov.Solver(sys, points=num_points, plotter=plotter)
+sol = lyapunov.Solver(system, points=num_points, plotter=plotter)
 plotter.x, plotter.t = sol.simulate(final_time)
 print "final state:", sol.x_out[-1]
 print "elapsed time =", time.clock() - start
+
+#Plot
 plotter.time_response() 
+if "showx" in sys.argv:
+	print "plotting states..."
+	titles = ["stator current", "rotor current", "angular velocity", "angle"]
+	for i in range(4):
+		plt.figure()
+		plt.plot(plotter.t, plotter.x[:,3+i], label="plant")
+		if "observe" in sys.argv:
+			plt.plot(plotter.t, plotter.x[:,7+i], label="observer")
+		plt.legend()
+		plt.xlabel('time (s)')
+		plt.title(titles[i])
+		plt.show()
+	print "done"
 

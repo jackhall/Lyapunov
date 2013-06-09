@@ -98,6 +98,8 @@ class SlidingDemo(object):
 			plt.close()
 
 
+#################
+# Controllers
 class PID(object):
 	def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
 		self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
@@ -113,12 +115,13 @@ class PID(object):
 	def u(self):
 		return self._force
 
+################
 
 class CompositeSystem(object):
 	def __init__(self, sys_list):
 		self._subsystems = list(sys_list) #just use an OrderedDict!
-		self._have_state = map(self.has_state, sys_list)
-		self._have_time = map(self.has_time, sys_list)
+		self._have_state = map(self._has_state, sys_list)
+		self._have_time = map(self._has_time, sys_list)
 		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
 		self._num_states = sum(len(sys) for sys in 
 							compress(sys_list, self._have_state))
@@ -174,7 +177,7 @@ class CompositeSystem(object):
 		return self._num_states
 		
 	@staticmethod
-	def has_state(sys):
+	def _has_state(sys):
 		try:
 			sys.state
 			return True
@@ -182,7 +185,7 @@ class CompositeSystem(object):
 			return False	
 
 	@staticmethod
-	def has_time(sys):
+	def _has_time(sys):
 		try:
 			sys.time
 			return True
@@ -191,14 +194,14 @@ class CompositeSystem(object):
 
 	def replace_subsystem(self, index, new_system):
 		self._subsystems[index] = new_system
-		self._have_state[index] = self.has_state(new_system)
-		self._have_time[index] = self.has_time(new_system)
+		self._have_state[index] = self._has_state(new_system)
+		self._have_time[index] = self._has_time(new_system)
 		self._are_callable[index] = hasattr(new_system, "__call__")
 
 	def add_subsystem(self, index, new_system):
 		self._subsystems.insert(index, new_system)
-		self._have_state.insert(index, self.has_state(new_system))
-		self._have_time.insert(index, self.has_time(new_system))
+		self._have_state.insert(index, self._has_state(new_system))
+		self._have_time.insert(index, self._has_time(new_system))
 		self._are_callable.insert(index, hasattr(new_system, "__call__"))
 
 	def remove_subsystem(self, index):
@@ -241,6 +244,8 @@ class SubsystemDemo(object):
 		self.plant.plot()
 		
 
+#################
+# Input Signals
 class StepSignal(object):
 	def __init__(self, step_time=1.0, y0=0.0, yf=1.0):
 		self.step_time, self.initial, self.final = step_time, y0, yf
@@ -259,7 +264,10 @@ class SquareWave(object):
 
 	@property
 	def value(self):
-		return self.upper if self.time % self.period < 0.5 else self.lower
+		if self.time % self.period < 0.5*self.period:
+			return self.upper
+		else:
+			return self.lower
 
 
 class SineWave(object):
@@ -292,6 +300,7 @@ class ChirpSignal(object):
 		inst_freq = self.f0 * self.freq_fcn(self.time)
 		return self.mean + self.amplitude*math.sin(inst_freq*self.time)
 
+#################
 
 class Filter(object):
 	""" Differentiates a reference signal with a linear filter. The 
@@ -453,37 +462,6 @@ class Plotter(object):
 	#			self.system.state = coordinates #is it ok to assume a time slice is ok?
 	#			Dx[i,j], Dy[i,j] = self.system()
 	#	plt.quiver(x, y, Dx, Dy)
-		
-	#def plot_system(self):
-	#	#t = numpy.linspace(0, self.final_time, self.points) #time vector
-	#	plt.figure() #plot object
-	#	final_time_list = self.final_time
-	#	try:
-    #			[ x for x in self.final_time]
-	#	except TypeError:
-	#		final_time_list = [ self.final_time for x in range(len(self.initial_state)) ]
-	#	for state0, tf in zip(self.initial_state, final_time_list):
-	#		states, time = self.simulate(state0, tf)
-	#		#integrate.odeint(self.f, state0, t, args=(self,))
-	#		x, y = states[:,0], states[:,1]
-	#		if max(x) > xmax: 
-	#			xmax = max(x)
-	#		if min(x) < xmin: 
-	#			xmin = min(x)
-	#		if max(y) > ymax: 
-	#			ymax = max(y)
-	#		if min(y) < ymin: 
-	#			ymin = min(y)
-	#		plt.plot(x, y, color='blue')
-	#		plt.plot(state0[0], state0[1], 'bo', markersize=7)
-	#	self.phase_portrait(xmin - self.xmargins[0], xmax + self.xmargins[1], ymin - self.ymargins[0], ymax + self.ymargins[1])
-	#	plt.xlabel(self.xlabel)
-	#	plt.ylabel(self.ylabel)
-	#	plt.title(self.title)
-	#	plt.savefig(self.filename, dpi=300)
-	#	plt.show()
-
-	
 
 #Here is a pythonic enum pattern:
 #def enum(**enums):
