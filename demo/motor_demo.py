@@ -161,22 +161,30 @@ class Observer(object):
 
 class SMController(object):
 	"""sliding mode control"""
-	def __init__(self, plant, eta_value):
-		System.__init__(self, plant.state)
-		self.eta = eta_value
+	def __init__(self, plant, eta, lmbda):
+		self.plant = plant
+		self.eta = eta
+		self.lmbda = lmbda
 		self.x = self.r = self.y = None
 
-	@property
-	def mode(self):
-		"""read self.x and compute mode"""
-		pass
+	def u(self):
+		return self._control_effort
 
 	def __call__(self):
 		"""needs full reference signal, including derivatives"""
-		x1, x2, x3, x4 = self.x()
-		u_eq = 0.0
-		u_d = 0.0
-		return u_eq + u_d
+		epsilon = 0.001
+		#Compute the equivalent torque that cancels system behavior.
+		p = self.plant 
+		x1, x2, x3, __ = self.x()
+		r, rdot, r2dot, r3dot = self.r()
+		den = epsilon if x2 == 0.0 else p.c*x2
+		u_eq = (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
+				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
+		#Compute restoring torque
+		y, ydot, y2dot = self.y()
+		s = (r-y)*self.lmbda**2 + 2*(rdot-ydot)*self.lmbda + (r2dot - y2dot)
+		u_d = self.eta if s > 0 else -self.eta
+		self._control_effort = u_eq + u_d
 
 
 #class SMCObsrv(FBLObsrv):
@@ -189,23 +197,21 @@ class SMController(object):
 #		self.controller.x = lambda : self.observer.state
 
 #Choose input function
+points_per_sec = 1000
 if "step" in sys.argv:
 	final_time = 8.0
-	num_points = 1000
 	reference = lyapunov.StepSignal(step_time=2.0, yf=2.0)
 elif "squarewave" in sys.argv:
 	final_time = 30.0
-	num_points = 3000
 	reference = lyapunov.SquareWave(period=10.0, y_lower=-1.0, y_upper=1.0)
 elif "chirp" in sys.argv:
 	final_time = 60.0
-	num_points = 6000
 	reference = lyapunov.ChirpSignal(f0=0.05, freq_fcn=lambda t:0.2*t)
 else:
 	print "defaulting control signal to regulation"
 	final_time = 8.0
-	num_points = 1000
 	reference = lyapunov.StepSignal(step_time=final_time+1)
+num_points = int(final_time*points_per_sec)
 
 #Construct subsystems.
 plant = Motor()
@@ -213,7 +219,8 @@ if "fbl" in sys.argv:
 	controller = FBLController(plant)
 	print "Feedback Linearizing control"
 elif "smc" in sys.argv:
-	controller = SMController(plant)
+	#does lmbda > 1 make sense?
+	controller = SMController(plant, eta=10, lmbda=1.5) 
 	print "Sliding Mode control"
 else:
 	raise RuntimeError("Define a controller! (fbl or smc)")
