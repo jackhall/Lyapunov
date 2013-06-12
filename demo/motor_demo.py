@@ -19,6 +19,7 @@
 #The author may be reached at jackhall@utexas.edu.
 
 import sys
+import math
 import matplotlib.pyplot as plt
 import time
 import numpy
@@ -94,21 +95,27 @@ class FBLController(object):
 	def u(self):
 		return self._control_effort
 
-	def __call__(self):
-		"""takes reference(+derivatives) & states, returns control effort"""
+	def _u_eq(self):
 		epsilon = 0.001
 		#Compute the equivalent torque that makes the system linear.
 		p = self.plant 
 		x1, x2, x3, __ = self.x()
 		r, rdot, r2dot, r3dot = self.r()
 		den = epsilon if x2 == 0.0 else p.c*x2
-		u_eq = (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
-				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
+		return (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
+					+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
+
+	def __call__(self):
+		"""takes reference(+derivatives) & states, returns control effort"""
+		p = self.plant
+		r, rdot, r2dot, r3dot = self.r()
 		#Now compute the control torque.
+		_, x2, _, _ = self.x()
+		den = epsilon if x2 == 0.0 else p.c*x2
 		k1, k2, k3 = self._gains
 		y, ydot, y2dot = self.y()
 		u_c = p.Ls * (k1*(r-y) + k2*(rdot-ydot) + k3*(r2dot-y2dot)) / den
-		self._control_effort = u_eq + u_c
+		self._control_effort = self._u_eq() + u_c
 
 
 class Observer(object):
@@ -159,7 +166,7 @@ class Observer(object):
 			[xidot - output_error*L for (xidot, L) in zip(xdot, self._gains)])
 
 
-class SMController(object):
+class SMController(FBLController):
 	"""sliding mode control"""
 	def __init__(self, plant, eta, lmbda):
 		self.plant = plant
@@ -167,24 +174,15 @@ class SMController(object):
 		self.lmbda = lmbda
 		self.x = self.r = self.y = None
 
-	def u(self):
-		return self._control_effort
-
 	def __call__(self):
 		"""needs full reference signal, including derivatives"""
-		epsilon = 0.001
-		#Compute the equivalent torque that cancels system behavior.
-		p = self.plant 
-		x1, x2, x3, __ = self.x()
 		r, rdot, r2dot, r3dot = self.r()
-		den = epsilon if x2 == 0.0 else p.c*x2
-		u_eq = (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
-				+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
 		#Compute restoring torque
 		y, ydot, y2dot = self.y()
 		s = (r-y)*self.lmbda**2 + 2*(rdot-ydot)*self.lmbda + (r2dot - y2dot)
-		u_d = self.eta if s > 0 else -self.eta
-		self._control_effort = u_eq + u_d
+		#u_d = self.eta if s > 0 else -self.eta
+		u_d = self.eta*math.tanh(10.0*s)
+		self._control_effort = self._u_eq() + u_d
 
 
 #class SMCObsrv(FBLObsrv):
@@ -229,7 +227,6 @@ prefilter = lyapunov.Filter((244, 117.2, 18.75))
 #Connect subsystems
 plant.u = controller.u
 #no disturbance yet		self.plant.d.link_to
-controller.y = plant.output
 controller.r = prefilter.output
 prefilter.signal = lambda : reference.value #value is a property
 labels = {'reference angle': lambda : reference.value,
@@ -239,12 +236,14 @@ plant.state = (1.0, 1.0, 0.0, -1.0) #randomize?
 prefilter.state = (0.0,)*len(prefilter)
 
 if "observe" not in sys.argv:
+	controller.y = plant.output
 	controller.x = lambda : plant.state  
 	system = lyapunov.CompositeSystem([reference, prefilter, 
 									controller, plant])
 	print "no observer"
 else:
 	observer = Observer(plant)
+	controller.y = observer.output
 	controller.x = lambda : observer.state
 	observer.y = plant.output
 	observer.u = controller.u
@@ -255,6 +254,9 @@ else:
 	print "with observer"
 
 #Configure plotter
+if "showu" in sys.argv:
+	#labels['control effort'] = controller.u
+	labels['u_eqivalent'] = controller._u_eq
 plotter = lyapunov.Plotter(system, labels)
 
 #Simulate

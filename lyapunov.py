@@ -337,18 +337,58 @@ class Filter(object):
 		return self._state[1:] + (self._xndot,)
 
 
+class Event(object):
+	""" A terminal event - stops solving before a sign change """
+	def __init__(self, name, function):
+		self.name = name 
+		self.function = function
+
+	def __call__(self):
+		return self.function()
+
+	@property
+	def flag(self):
+		return False
+
+	@flag.setter
+	def flag(self, x):
+		if x is True:
+			raise RuntimeError(self.name)
+
+
+class Mode(object):
+	""" A persistent mode, with entry and exit functions """
+	def __init__(self, name, enter, exit, active=False):
+		""" enter and exit should take no arguments and each return a float
+		    that changes sign when an event occurs	"""
+		self.name = name
+		self.enter, self.exit = enter, exit
+		self.flag = active 
+		#self.terminal = terminal #whether or not solver halts
+
+	def __call__(self):
+		if self.flag:
+			return self.exit()
+		else:
+			return self.enter()
+
+#Event and Mode represent terminal and sticking events, respectively.
+#Remember to flag an event as active just before stepping through the boundary!
+#Make sure to catch the error properly in order to return state history!
+#A common interface for setting system mode is needed. Must work with 
+#	CompositeSystem and be reasonably easy to emulate.
+
 class Solver(object):
-	def __init__(self, system, events=False, min_ratio=.01, 
+	def __init__(self, system, events=[], min_ratio=.01, 
 			     points=100, plotter=None): 
 		self.system = system
-		self.plotter = plotter
+		self.plotter = plotter #has a update()
+		self.events = events #have enter() and exit(), which return floats
 		self.stepper = solvers.Stepper(system)
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
 		if not hasattr(system, '__call__'):
 			raise AttributeError("Need to compute state derivatives")
-		self.events = events is True
-		self._autonomous = not hasattr(system, 'time') 
 		self.points = points #number of points recorded/plotted
 		self.min_ratio = min_ratio
 
@@ -364,21 +404,28 @@ class Solver(object):
 			self._min_step_ratio = new_min_ratio
 
 	def simulate(self, final_time):
-		if self._autonomous:
+		#Input checks for events an system.time
+		events_provided = len(self.events) != 0
+		if events_provided:
+			active = []
+			inactive = self.events
+		autonomous = not hasattr(system, 'time')
+		if autonomous:
 			self.system.time = 0.0 #means that system.time is reserved!
+		#Initialize solving loop.
 		step_size = (final_time - self.system.time) / self.points
-		self.x_out = [self.system.state]
-		self.t_out = [self.system.time]
-		if self.events is True:
-			current_mode = str(self.system.mode) #assumes string type!
+		x_out = [self.system.state]
+		t_out = [self.system.time]
 		#main solver loop
 		while self.system.time < final_time:
+			#Step forward in time.
 			self.stepper.step(step_size)
+			#Check to make sure system states have not become invalid.
 			if True in map(math.isnan, self.system.state):
 				print "System state is NaN!"
 				pdb.set_trace()
-			if self.events is True:
-				#Detect an event - defined as a change in system.mode.
+			#Detect an event - defined as a change in sign.
+			if events_provided:
 				if self.system.mode != current_mode:
 					self.stepper.find_root(step_size, 
 										   step_size*self.min_ratio);
@@ -386,27 +433,14 @@ class Solver(object):
 			#Record for output.
 			if self.plotter is not None:
 				self.plotter.update()
-			self.x_out.append(self.system.state)
-			self.t_out.append(self.system.time)
-		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
-		if self._autonomous:
+			x_out.append(self.system.state)
+			t_out.append(self.system.time)
+		#Reset system to initial conditions.
+		self.system.state, self.system.time = x_out[0], t_out[0]
+		if autonomous:
 		 	del self.system.time
-		return numpy.array(self.x_out), numpy.array(self.t_out)
-		#try:
-		#	self.compute_output()
-		#	return (numpy.array(self.x_out), 
-		#			numpy.array(self.y_out), 
-		#			numpy.array(self.t_out))
-		#except AttributeError: 
-		#	return numpy.array(self.x_out), numpy.array(self.t_out)
-	
-	def compute_output(self):
-		self.y_out = []
-		for x, t in zip(self.x_out, self.t_out):
-			self.system.state, self.system.time = x, t
-			self.y_out.append(self.system.output)
-		self.system.state, self.system.time = self.x_out[0], self.t_out[0]
-
+		return numpy.array(x_out), numpy.array(t_out)
+			
 
 class Plotter(object):
 	def __init__(self, system, labels):
@@ -447,6 +481,15 @@ class Plotter(object):
 			self.system.state = x
 			self.system.time = t
 			self.update()		
+
+
+class PlotterList(object):
+	def __init__(self, plt_list):
+		self.plotters = plt_list
+
+	def update(self):
+		for plotter in self.plotters:
+			plotter.update()
 
 
 	#def phase_portrait(self):
