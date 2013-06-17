@@ -376,7 +376,8 @@ class Mode(object):
 #Remember to flag an event as active just before stepping through the boundary!
 #Make sure to catch the error properly in order to return state history!
 #A common interface for setting system mode is needed. Must work with 
-#	CompositeSystem and be reasonably easy to emulate.
+#CompositeSystem and be reasonably easy to emulate.
+#Ask user to define a function to alter the system.
 
 class Solver(object):
 	def __init__(self, system, events=[], min_ratio=.01, 
@@ -443,6 +444,9 @@ class Solver(object):
 			
 
 class Plotter(object):
+	""" Update to use object-oriented interface from matplotlib. 
+		Use 3-tiered dict to store labels: figures, subfigures, lines?
+		Flat is better than nested. """
 	def __init__(self, system, labels):
 		self.system = system
 		self.labels = labels
@@ -481,8 +485,7 @@ class Plotter(object):
 			self.system.state = x
 			self.system.time = t
 			self.update()		
-
-
+	
 class PlotterList(object):
 	def __init__(self, plt_list):
 		self.plotters = plt_list
