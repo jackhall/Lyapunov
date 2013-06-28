@@ -485,7 +485,8 @@ class Plotter(object):
 			self.system.state = x
 			self.system.time = t
 			self.update()		
-	
+
+
 class PlotterList(object):
 	def __init__(self, plt_list):
 		self.plotters = plt_list
