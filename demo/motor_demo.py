@@ -268,7 +268,7 @@ print "simulating for", final_time, "sec with", num_points, "points."
 start = time.clock()
 sol = lyapunov.Solver(system, points=num_points, plotter=plotter)
 plotter.x, plotter.t = sol.simulate(final_time)
-print "final state:", sol.x_out[-1]
+print "final state:", plotter.x[-1]
 print "elapsed time =", time.clock() - start
 
 #Plot
