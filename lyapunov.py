@@ -409,7 +409,7 @@ class Solver(object):
 		if events_provided:
 			active = []
 			inactive = self.events
-		autonomous = not hasattr(system, 'time')
+		autonomous = not hasattr(self.system, 'time')
 		if autonomous:
 			self.system.time = 0.0 #means that system.time is reserved!
 		#Initialize solving loop.
