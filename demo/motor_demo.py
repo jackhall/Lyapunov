@@ -101,6 +101,7 @@ class FBLController(object):
 		p = self.plant 
 		x1, x2, x3, __ = self.x()
 		r, rdot, r2dot, r3dot = self.r()
+		#if abs(x2) < epsilon?
 		den = epsilon if x2 == 0.0 else p.c*x2
 		return (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
 					+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
@@ -138,6 +139,7 @@ class Observer(object):
 		L4 = 25 - p.b - p.beta - p.alpha
 		L3 = p.alpha*L4 + p.a*p.b*p.c*p.beta*x1**2 - 234
 		den = p.c*(p.a*x1*x3 + x2*(p.alpha+p.beta)) 
+		#if abs(den) > epsilon?
 		den = den if den != 0.0 else epsilon
 		L1 = ((1526 - (L3 + (p.b + p.beta)*L4 + (L4 + (p.alpha - 1))
 			 * p.alpha*p.beta*p.a*p.b*p.c*x1**2)*p.alpha**2) / den)

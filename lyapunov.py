@@ -24,6 +24,9 @@ import numpy
 import matplotlib.pyplot as plt
 import solvers
 
+#need to tell readers where to start reading
+#Solver -> CompositeSystem -> Plotter
+
 class SimpleDemo(object):
 	"""Mass spring damper system."""
 	def __init__(self):
@@ -49,6 +52,7 @@ class SimpleDemo(object):
 		except (AttributeError, TypeError): 
 			self.a = -x[1] - x[0]
 
+	#plot functions are deprecated!
 	def plot(self):
 		plt.figure()
 		try:
@@ -101,13 +105,16 @@ class SlidingDemo(object):
 #################
 # Controllers
 class PID(object):
+	""" SISO """
+	#need __len__
 	def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
 		self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
 		self.r = self.y = None
 		self.state = (0.0,) #integral term
-	
+
 	def __call__(self):
-		x, v = self.y()
+		#catch Nonetype exceptions for y and r!
+		x, v = self.y() #assumes second-order, y returns output derivative
 		error = self.r() - x
 		self._force = self.Kp*error + self.Ki*self.state[0] - self.Kd*v
 		return (error,)
@@ -119,10 +126,12 @@ class PID(object):
 
 class CompositeSystem(object):
 	def __init__(self, sys_list):
+		#consider passing initial time as a keyword argument
 		self._subsystems = list(sys_list) #just use an OrderedDict!
 		self._have_state = map(self._has_state, sys_list)
 		self._have_time = map(self._has_time, sys_list)
 		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
+		#change to remove assumption of __len__
 		self._num_states = sum(len(sys) for sys in 
 							compress(sys_list, self._have_state))
 		self.time = 0.0
@@ -133,6 +142,7 @@ class CompositeSystem(object):
 						+ "should be callable")
 
 	def __call__(self):
+		#generator that skips non-callable subsystems
 		call_iter = compress(self._subsystems, self._are_callable)
 		#NoneType error when call_iter is used?
 		return tuple(chain.from_iterable(
@@ -146,6 +156,7 @@ class CompositeSystem(object):
 
 	@property
 	def state(self):
+		#generator skipping non-state subsystems
 		state_iter = compress(self._subsystems, self._have_state)
 		return tuple(chain.from_iterable(
 					 imap(lambda sys : sys.state, state_iter)))
@@ -192,6 +203,7 @@ class CompositeSystem(object):
 		except AttributeError:
 			return False
 
+	#replace is extraneous
 	def replace_subsystem(self, index, new_system):
 		self._subsystems[index] = new_system
 		self._have_state[index] = self._has_state(new_system)
@@ -324,6 +336,8 @@ class Filter(object):
 	def state(self, x):
 		self._state = x
 		#Compute the only nontrivial deriviative.
+		#parenthesis for (q,d)?
+		#catch Nonetype exception?
 		self._xndot = ( sum(-q*d for (q,d) in zip(self._state, self._gains)) 
 					  + self._gains[0]*self.signal()) 
 
@@ -382,10 +396,12 @@ class Mode(object):
 class Solver(object):
 	def __init__(self, system, events=[], min_ratio=.01, 
 			     points=100, plotter=None): 
+		#define 'min_ratio' and 'points'
+		#maybe use keyword arguments for points and/or dt
 		self.system = system
 		self.plotter = plotter #has a update()
-		self.events = events #have enter() and exit(), which return floats
-		self.stepper = solvers.Stepper(system)
+		self.events = events #not up-to-date
+		self.stepper = solvers.Stepper(system) #where does Stepper come from?
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
 		if not hasattr(system, '__call__'):
@@ -400,11 +416,12 @@ class Solver(object):
 	@min_ratio.setter
 	def min_ratio(self, new_min_ratio):
 		if new_min_ratio > 1:
-			self._min_step_ratio = 1.0 / min_ratio
+			self._min_step_ratio = 1.0 / new_min_ratio
 		else:
 			self._min_step_ratio = new_min_ratio
 
 	def simulate(self, final_time):
+		#make final_time a keyword arg to match init style
 		#Input checks for events an system.time
 		events_provided = len(self.events) != 0
 		if events_provided:
@@ -420,7 +437,7 @@ class Solver(object):
 		#main solver loop
 		while self.system.time < final_time:
 			#Step forward in time.
-			self.stepper.step(step_size)
+			self.stepper.step(step_size) #alters system.state and system.time
 			#Check to make sure system states have not become invalid.
 			if True in map(math.isnan, self.system.state):
 				print "System state is NaN!"
@@ -429,7 +446,7 @@ class Solver(object):
 			if events_provided:
 				if self.system.mode != current_mode:
 					self.stepper.find_root(step_size, 
-										   step_size*self.min_ratio);
+										   step_size*self.min_ratio)
 					current_mode = str(self.system.mode)
 			#Record for output.
 			if self.plotter is not None:
@@ -448,6 +465,7 @@ class Plotter(object):
 		Use 3-tiered dict to store labels: figures, subfigures, lines?
 		Flat is better than nested. """
 	def __init__(self, system, labels):
+		#labels is a dict ... explain
 		self.system = system
 		self.labels = labels
 		self.lines = {label: [] for label in labels.iterkeys()}
@@ -472,6 +490,7 @@ class Plotter(object):
 		plt.show()
 
 	def phase_portrait(self, xlabel, ylabel):
+		#does not evaluate derivatives! explain
 		plt.figure()
 		plt.plot(numpy.array(self.lines[xlabel]), 
 				 numpy.array(self.lines[ylabel]))
@@ -480,6 +499,7 @@ class Plotter(object):
 		plt.show()
 
 	def reconstruct(self, solver):
+		#need to pass state histories instead of the solver object!
 		self.clear()
 		for x, t in zip(solver.x_out, solver.t_out):
 			self.system.state = x
