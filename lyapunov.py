@@ -1,3 +1,45 @@
+#!/usr/bin/env python
+"""
+Lyapunov is a toolbox for integrating dynamical systems. 
+
+Instead of treating systems as functions, lyapunov represents systems as 
+objects. Not only does this significantly clean up the solver interface, but 
+it also encourages the encapsulation of subsystems. Exposed classes:
+
+Solver - An object-oriented ODE solver.
+Plotter - A way to track and later plot any system data. 
+CompositeSystem - A container/manager for subsystems, itself a system.
+Filter - A linear filter of arbitrary order. 
+StepSignal - Generates a step signal.
+SquareWave - Generates a square wave.
+SineWave - Generates an sinusoid.
+ChirpSignal - Generates a sinusoid with an arbitrary instantaneous frequency.
+
+--For a full description of Lyapunov's system concept, see lyapunov.Solver. 
+
+--lyapunov.CompositeSystem provides a subsystem manager that itself 
+  implements the system interface, allowing the user to build arbitrarily 
+  complex hierarchies of subsystems.
+
+--For convenient plotting state or output trajectories (in time or as a 
+  phase portrait), see lyapunov.Plotter. 
+
+--The file 'demo/motor_demo.py' has a full demonstration of the above 
+  features. 
+
+--Event detection and constraint management are in the works.
+
+--Code generation from symbolic input (from sympy) may happen at some point.
+
+Integration of ordinary equations is done with a custom solver implemented
+in C++ using boost.python. See the makefile in the main directory for tips
+on compiling. A C++11 capable compiler will be needed, along with a recent
+copy of boost. Compilation and linking will result in a file called 
+'solvers.so' (or whatever suffix shared libraries have on your system). 
+Either place this file in the main directory with 'lyapunov.py', or put both
+in whatever system directory python looks in to import external modules.
+"""
+
 #Lyapunov: a library for integrating nonlinear dynamical systems
 #Copyright (C) 2013  John Wendell Hall
 #
@@ -24,8 +66,6 @@ import numpy
 import matplotlib.pyplot as plt
 import solvers
 
-#need to tell readers where to start reading
-#Solver -> CompositeSystem -> Plotter
 
 class SimpleDemo(object):
 	"""Mass spring damper system."""
@@ -394,6 +434,35 @@ class Mode(object):
 #Ask user to define a function to alter the system.
 
 class Solver(object):
+	"""
+	An ODE solver object for numerically integrating system objects.
+
+	Solver integrates the system with which it is initialized. An object
+	implements the system concept by providing 'state' (tuple of floats) 
+	and 'time' (float) data attributes or properties. Calling a system 
+	object with no arguments must return the current state derivatives 
+	(tuple of floats). 
+	
+	State derivatives should obviously correspond one-to-one with states. 
+	Setting 'state' and 'time' attributes should completely and uniquely 
+	map to state derivatives. This means that calling the system should not 
+	change the object in any way visible to Lyapunov). The 'time' attribute 
+	is optional (not needed for autonomous systems), but that name is still 
+	reserved. 
+
+	Initialize Solver with a system and (optionally) a plotter object. To
+	run a simulation, call 'simulate'.
+	Information on step size and simulation length should be provided when
+	'simulate' is called or beforehand. The state and time of the system
+	when 'simulate' is called will be used as the initial state and time.
+
+	The solver is a Cash-Karp Runge-Kutta solver (order 5) with a fixed step.
+	In the future, variable step solving may be available as well as a wider
+	range of solvers. 
+
+	Event detection is not finished at the moment, but it's on the way.
+	"""
+
 	def __init__(self, system, events=[], min_ratio=.01, 
 			     points=100, plotter=None): 
 		#define 'min_ratio' and 'points'
