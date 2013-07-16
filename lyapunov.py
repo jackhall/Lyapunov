@@ -433,6 +433,95 @@ class Mode(object):
 #CompositeSystem and be reasonably easy to emulate.
 #Ask user to define a function to alter the system.
 
+class Time(object):
+	"""
+	An iterable that acts like a time list.
+
+   	The Time class supports flexible methods for defining said list. Enough 
+	of these attributes need to be defined before a given instance
+	is used as an iterable (like during a simulation):
+
+	--initial_time
+	--step_size
+	--final_time
+	--points (an int)
+	--span
+
+	Any of these can be specified as keyword arguments on initialization
+	or set as simple data attributes. No checking is performed until the
+	'construct' method is called (it's called automatically when the object
+	is used as an iterable). See 'construct' docstring for more information.
+	"""
+
+	def __init__(self, **kwargs):
+		"""
+		Accepts any of the following keyword arguments:
+
+		--initial_time
+		--step_size
+		--final_time
+		--points (an int)
+		--span
+
+		Provided arguments are assigned to the relevant data attributes.
+		"""
+		self.initial_time = kwargs.get('initial_time')
+		self.step_size = kwargs.get('step_size')
+		self.final_time = kwargs.get('final_time')
+		self.points = kwargs.get('points')
+		self.span = kwargs.get('span')
+
+	def construct(self):
+		"""
+		Infer 'initial_time', 'step_size', and/or 'final_time'.
+
+		Usage: [Time].construct()
+
+		If any of the primary attributes ('initial_time', 'final_time', and
+		'step_size') are not provided, the method will attempt to infer them 
+		from secondary attributes ('span', 'points'). In case of conflict,
+		information from primary attributes is preferred, and secondary 
+		attributes will be made consistent.
+		"""
+		if self.final_time is None and self.inital_time is None:
+			raise RuntimeError("No absolute time information given.")
+		if self.step_size is None and self.points is None:
+			raise RuntimeError("No time sparseness/density information given.")
+		if self.final_time is None:
+			if self.span is not None:
+				self.final_time = self.initial_time + self.span
+			elif self.points is not None and self.dt is not None:
+				self.final_time = (self.initial_time + 
+								   self.step_size * (self.points-1))
+			else:
+				raise RuntimeError("final_time undefined")
+		if self.inital_time is None:
+			if self.span is not None:
+				self.initial_time = self.final_time - self.span
+			elif self.points is not None and self.dt is not None:
+				self.initial_time = (self.final_time - 
+									 self.step_size * (self.points-1))
+			else:
+				raise RuntimeError("initial_time undefined")
+		self.span = self.final_time - self.initial_time
+		if self.step_size is None:
+			self.step_size = self.span / self.points
+		else:
+			self.points = self.span / self.step_size
+
+	def __iter__(self):
+		"""
+		Use Time objects as an iterable. Note: 'construct' is called.
+		"""
+		self._construct()
+		current_time = self.inital_time
+		while current_time <= self.final_time:
+			yield current_time
+			current_time += self.step_size
+
+
+#update Solver to use Time!
+
 class Solver(object):
 	"""
 	An ODE solver object for numerically integrating system objects.
@@ -461,33 +550,49 @@ class Solver(object):
 	range of solvers. 
 
 	Event detection is not finished at the moment, but it's on the way.
+	Should events be associated with system or solver?
 	"""
 
-	def __init__(self, system, events=[], min_ratio=.01, 
-			     points=100, plotter=None): 
-		#define 'min_ratio' and 'points'
-		#maybe use keyword arguments for points and/or dt
+	def __init__(self, system, time=Time(), plotter=None):
+		"""
+		Instantiate an ODE solver for a given system.
+
+		Usage: Solver(system, time=Time(), plotter=None)
+
+		A minimal system object is required to instantiate a Solver. 
+		AttributeErrors will be raised if the system concept is incomplete.
+
+		An iterable 'time' is needed before 'simulate' is called, and can
+		optionally be provided here. Such an iterable should provide a
+		float for each time step the solver needs to output. Note that
+		improperly-specified 'time' iterables may cause the solver to 
+		diverge from the solution.
+		
+		A plotter object (anything that provides an 'update' method that 
+		takes no arguments) is optional for simulation, but can also be 
+		provided here.
+		"""
+		#events and rootfinding options omitted for now
+		#is there a way to make plotter modular wrt system?
 		self.system = system
+		self.time = time
 		self.plotter = plotter #has a update()
-		self.events = events #not up-to-date
 		self.stepper = solvers.Stepper(system) #where does Stepper come from?
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
 		if not hasattr(system, '__call__'):
 			raise AttributeError("Need to compute state derivatives")
-		self.points = points #number of points recorded/plotted
-		self.min_ratio = min_ratio
 
-	@property
-	def min_ratio(self):
-		return self._min_step_ratio
+	#@property
+	#def min_ratio(self):
+	#	return self._min_step_ratio
 
-	@min_ratio.setter
-	def min_ratio(self, new_min_ratio):
-		if new_min_ratio > 1:
-			self._min_step_ratio = 1.0 / new_min_ratio
-		else:
-			self._min_step_ratio = new_min_ratio
+	#@min_ratio.setter
+	#def min_ratio(self, new_min_ratio):
+	#	if new_min_ratio > 1:
+	#		self._min_step_ratio = 1.0 / new_min_ratio
+	#	else:
+	#		self._min_step_ratio = new_min_ratio
 
 	def simulate(self, final_time):
 		#make final_time a keyword arg to match init style
