@@ -299,23 +299,44 @@ class SubsystemDemo(object):
 #################
 # Input Signals
 class StepSignal(object):
-	def __init__(self, step_time=1.0, y0=0.0, yf=1.0):
-		self.step_time, self.initial, self.final = step_time, y0, yf
+	"""
+	Generates a step signal. The value of the step signal depends on the
+	value of '[StepSignal].time'.
+	"""
+
+	def __init__(self, step_time=1.0, y_initial=0.0, y_final=1.0):
+		"""
+		Initialize with the time at which the step occurs, the value
+		before the step, and the value after the step.
+
+		Usage: StepSignal(step_time=1.0, y_initial=0.0, y_final=1.0)
+		"""
+		self.step_time = step_time
+		self.initial, self.final = y_initial, y_final
 		self.time = 0.0
 
 	@property
 	def value(self):
+		""" The current value of the signal. """
 		return self.initial if self.time < self.step_time else self.final
 
 
 class SquareWave(object):
+	"""
+	Generates a square wave. The value depends on '[SquareWave].time'.
+	"""
 	def __init__(self, period=1.0, y_lower=-1.0, y_upper=1.0):
-		"""frequency is measured in Hz"""
+		"""
+		Initialize with the period, the trough value, and the peak value.
+
+		Usage: SquareWave(period=1.0, y_lower=-1.0, y_upper=1.0)
+		"""
 		self.period, self.lower, self.upper = period, y_lower, y_upper
 		self.time = 0.0
 
 	@property
 	def value(self):
+		""" The current value of the signal. """
 		if self.time % self.period < 0.5*self.period:
 			return self.upper
 		else:
@@ -323,24 +344,38 @@ class SquareWave(object):
 
 
 class SineWave(object):
+	"""
+	Generates a sinusoid. Value depends on '[SineWave].time'.
+	"""
 	def __init__(self, frequency=1.0, mean=0.0, amplitude=1.0, phase=0.0):
-		""" Frequency is in rad/s. """
+		"""
+		Initialize with frequency, DC magnitude, AC magnitude, and phase shift.
+		Frequency is in rad/s, and the phase shift is positive. 
+
+		Usage: SineWave(frequency=1.0, mean=0.0, amplitude=1.0, phase=0.0)
+		"""
 		self.frequency, self.phase = frequency, phase
 		self.mean, self.amplitude = mean, amplitude
 		self.time = 0.0
 	
 	@property
 	def value(self):
+		""" The current value of the signal. """
 		return self.amplitude*math.sin(self.frequency*self.time 
 				+ self.phase) + self.mean
 
 
 class ChirpSignal(object):
+	"""
+	Generates a sinusoid with an arbitrary instantaneous frequency.
+	"""
 	def __init__(self, f0, freq_fcn=None, amplitude=2.0, mean=0.0):
-		""" Frequencies are in rad/s. Instantaneous frequency is 
-			f = f0 + freq_fcn(time) """
+		""" 
+		Initialize with the starting frequency ...
+		Frequencies are in rad/s. Instantaneous frequency is 
+		f = f0 + freq_fcn(time) """
 		self.amplitude, self.mean = amplitude, mean
-		self.f0 = f0
+		self.f0 = f0 #not the initial frequency!
 		self.time = 0.0
 		if freq_fcn is None:
 			self.freq_fcn = lambda time : time
@@ -349,6 +384,7 @@ class ChirpSignal(object):
 
 	@property
 	def value(self):
+		""" The current value of the signal. """
 		inst_freq = self.f0 * self.freq_fcn(self.time)
 		return self.mean + self.amplitude*math.sin(inst_freq*self.time)
 
@@ -520,8 +556,6 @@ class Time(object):
 			current_time += self.step_size
 
 
-#update Solver to use Time!
-
 class Solver(object):
 	"""
 	An ODE solver object for numerically integrating system objects.
@@ -553,7 +587,7 @@ class Solver(object):
 	Should events be associated with system or solver?
 	"""
 
-	def __init__(self, system, time=Time(), plotter=None):
+	def __init__(self, system, plotter=None):
 		"""
 		Instantiate an ODE solver for a given system.
 
@@ -562,12 +596,6 @@ class Solver(object):
 		A minimal system object is required to instantiate a Solver. 
 		AttributeErrors will be raised if the system concept is incomplete.
 
-		An iterable 'time' is needed before 'simulate' is called, and can
-		optionally be provided here. Such an iterable should provide a
-		float for each time step the solver needs to output. Note that
-		improperly-specified 'time' iterables may cause the solver to 
-		diverge from the solution.
-		
 		A plotter object (anything that provides an 'update' method that 
 		takes no arguments) is optional for simulation, but can also be 
 		provided here.
@@ -575,7 +603,6 @@ class Solver(object):
 		#events and rootfinding options omitted for now
 		#is there a way to make plotter modular wrt system?
 		self.system = system
-		self.time = time
 		self.plotter = plotter #has a update()
 		self.stepper = solvers.Stepper(system) #where does Stepper come from?
 		#Check basic requirements of a system object...
@@ -594,68 +621,119 @@ class Solver(object):
 	#	else:
 	#		self._min_step_ratio = new_min_ratio
 
-	def simulate(self, final_time):
-		#make final_time a keyword arg to match init style
-		#Input checks for events an system.time
-		events_provided = len(self.events) != 0
-		if events_provided:
-			active = []
-			inactive = self.events
+	def simulate(self, time, initial_state=None):
+		"""
+		Numerically integrates the system over the given time iterable.
+
+		Such an iterable should provide a float for each time step the 
+		solver needs to output. Note that improperly-specified 'time' 
+		iterables may cause the solver to diverge from the solution if 
+		combined with a fixed-step solver.
+
+		After solving, the system will be reset to its state and time
+		before 'simulate' was called.
+		"""
+		#Initialize system
 		autonomous = not hasattr(self.system, 'time')
-		if autonomous:
-			self.system.time = 0.0 #means that system.time is reserved!
-		#Initialize solving loop.
-		step_size = (final_time - self.system.time) / self.points
+		if not autonomous:
+			original_time = self.system.time
+		#need code here that works with generators AND containers
+		time = iter(time)
+		self.system.time = time.next() #means that system.time is reserved!
+		original_state = self.system.state
+		if initial_state is not None:
+			self.system.state = initial_state
+		#Initialize recording
 		x_out = [self.system.state]
 		t_out = [self.system.time]
+		if self.plotter is not None:
+			self.plotter.update()
 		#main solver loop
-		while self.system.time < final_time:
+		for t in time:
 			#Step forward in time.
-			self.stepper.step(step_size) #alters system.state and system.time
+			self.stepper.step(t - self.system.time) 
 			#Check to make sure system states have not become invalid.
 			if True in map(math.isnan, self.system.state):
 				print "System state is NaN!"
 				pdb.set_trace()
 			#Detect an event - defined as a change in sign.
-			if events_provided:
-				if self.system.mode != current_mode:
-					self.stepper.find_root(step_size, 
-										   step_size*self.min_ratio)
-					current_mode = str(self.system.mode)
-			#Record for output.
-			if self.plotter is not None:
-				self.plotter.update()
+			#if events_provided:
+			#	if self.system.mode != current_mode:
+			#		self.stepper.find_root(step_size, 
+			#							   step_size*self.min_ratio)
+			#		current_mode = str(self.system.mode)
+			#Record state and output information
 			x_out.append(self.system.state)
 			t_out.append(self.system.time)
-		#Reset system to initial conditions.
-		self.system.state, self.system.time = x_out[0], t_out[0]
+			if self.plotter is not None:
+				self.plotter.update()
+		#Reset system to original conditions (before 'simulate' was called)
+		self.system.state = original_state
 		if autonomous:
 		 	del self.system.time
+		else:
+			self.system.time = original_time
 		return numpy.array(x_out), numpy.array(t_out)
 			
 
 class Plotter(object):
-	""" Update to use object-oriented interface from matplotlib. 
-		Use 3-tiered dict to store labels: figures, subfigures, lines?
-		Flat is better than nested. """
+	"""
+	Records system data during a Solver simulation through callbacks.
+
+	Use Plotter to record arbitrary system data during a simulation and
+	plot it afterwards. This object is instantiated with a dictionary 
+	mapping string variable names to callback functions. These functions
+	will be called with no arguments at each iteration of a solving loop 
+	to retrieve some scalar value. Using lambdas or system methods is  
+	usually convenient.
+
+	After simulation, call either 'time_response' or 'phase_portrait' to
+	plot. The former will plot all recorded quantities against time. The
+	latter should be called with two labels, which tell it which two 
+	variables to plot against each other.
+
+	Calling 'clear' will preserve labels and callbacks, but delete all saved
+	variable data.
+	"""
+	#Update to use object-oriented interface from matplotlib. 
+	#Use 3-tiered dict to store labels: figures, subfigures, lines?
+	#Flat is better than nested. 
 	def __init__(self, system, labels):
+		"""
+		Create a Plotter from a dict mapping variable labels to 
+		callback functions. The callback functions should be callable
+		with no argments and return a scalar numeric. 
+		"""
 		#labels is a dict ... explain
-		self.system = system
-		self.labels = labels
+		self.system = system #only used for time & reconstruct
+		self.labels = labels 
 		self.lines = {label: [] for label in labels.iterkeys()}
 		self.time = []
 
 	def update(self):
+		"""
+		Call with no arguments to record system variables at the 
+		current state and time. Usually only used by 'Solver.simulate'.
+		"""
 		self.time.append(self.system.time)
 		for label, f in self.labels.iteritems():
 			self.lines[label].append(f())
 
 	def clear(self):
+		"""
+		Call with no arguments to erase all saved records of state
+		variables. The callback functions and the labels themselves 
+		remain.
+		"""
 		self.time = []
 		for label in self.lines:
 			self.lines[label] = []
 
 	def time_response(self):
+		"""
+		Plots all saved records of system variables against time. String
+		labels are given in the legend. 
+		"""
 		plt.figure()
 		for label, data in self.lines.iteritems():
 			plt.plot(self.time, numpy.array(data), label=label)
@@ -664,6 +742,14 @@ class Plotter(object):
 		plt.show()
 
 	def phase_portrait(self, xlabel, ylabel):
+		"""
+		Plots the phase space trajectory of two system variables. This
+		means that they are plotted against each other for the currently
+		saved trajectory. The underlying vector field is NOT plotted, as
+		that would involve computing derivatives (which are not saved). 
+		Furthermore, the vector field could only be evaluated as a function
+		for a second-order autonomous system.
+		"""
 		#does not evaluate derivatives! explain
 		plt.figure()
 		plt.plot(numpy.array(self.lines[xlabel]), 
@@ -671,15 +757,7 @@ class Plotter(object):
 		plt.xlabel(xlabel)
 		plt.ylabel(ylabel)
 		plt.show()
-
-	def reconstruct(self, solver):
-		#need to pass state histories instead of the solver object!
-		self.clear()
-		for x, t in zip(solver.x_out, solver.t_out):
-			self.system.state = x
-			self.system.time = t
-			self.update()		
-
+	
 
 class PlotterList(object):
 	def __init__(self, plt_list):
