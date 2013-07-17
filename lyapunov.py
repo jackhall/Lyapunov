@@ -165,16 +165,36 @@ class PID(object):
 ################
 
 class CompositeSystem(object):
+	"""
+	A container/manager for subsystems, itself a system.
+
+	CompositeSystem acts as an aggregate of other objects which implement
+	some or all of the system concept. It will ascertain whether each 
+	contained object has a 'state' attribute, a 'time' attribute, and/or
+	is callable. Objects with state must be callable. CompositeSystem will 
+	ignore objects with none of these interface elements. 
+	
+	The order in which subsystems are stored determines the order of 
+	evaluation and update. For instance, when CompositeSystem is called, 
+	it will call each of its callable subsystems in order.  When 'state' is 
+	queried or set, CompositeSystem will accordingly chain together all subsystem 
+	state tuples or slice them.
+	"""
 	def __init__(self, sys_list):
-		#consider passing initial time as a keyword argument
-		self._subsystems = list(sys_list) #just use an OrderedDict!
-		self._have_state = map(self._has_state, sys_list)
+		"""
+		Initialize with an iterable of the subsystems to be managed. 
+		Subsystem 'time' attributes are not synchronized until 
+		CompositeSystem's 'time' attribute is set.
+
+		Usage: CompositeSystem(sys_list)
+		"""
+		self._subsystems = list(sys_list) #use an OrderedDict?
+		self._dof = map(self._count_states, sys_list)
+		self._have_state = [n>0 for n in self._dof]
 		self._have_time = map(self._has_time, sys_list)
 		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
-		#change to remove assumption of __len__
-		self._num_states = sum(len(sys) for sys in 
+		self._num_states = sum(len(sys.state) for sys in 
 							compress(sys_list, self._have_state))
-		self.time = 0.0
 		#Check to make sure that any system that has state is callable.
 		for has_state, can_call in zip(self._have_state, self._are_callable):
 			if has_state and not can_call:
@@ -182,6 +202,9 @@ class CompositeSystem(object):
 						+ "should be callable")
 
 	def __call__(self):
+		"""
+		Call each callable subsystem in turn, and concatenate the results.
+		"""
 		#generator that skips non-callable subsystems
 		call_iter = compress(self._subsystems, self._are_callable)
 		#NoneType error when call_iter is used?
@@ -196,6 +219,10 @@ class CompositeSystem(object):
 
 	@property
 	def state(self):
+		"""
+		Concatenate and return state information from all subsystems 
+		that have it.
+		"""
 		#generator skipping non-state subsystems
 		state_iter = compress(self._subsystems, self._have_state)
 		return tuple(chain.from_iterable(
@@ -203,13 +230,18 @@ class CompositeSystem(object):
 
 	@property
 	def subsystems(self):
+		"""Returns a copy of the subsystem list. """
 		return list(self._subsystems)
 
 	@state.setter
 	def state(self, x):
+		"""
+		Distributes slices of a concatenated state tuple to their
+		corresponding stated subsystems."""
 		a = 0
-		for sys in compress(self._subsystems, self._have_state):
-			b = a + len(sys)
+		state_iter = compress(self._subsystems, self._have_state) 
+		for i, sys in enumerate(state_iter):
+			b = a + self._dof[i]
 			sys.state = x[a:b]
 			a = b
 		assert b == self._num_states
@@ -220,20 +252,17 @@ class CompositeSystem(object):
 
 	@time.setter
 	def time(self, t):
+		"""Updates the 'time' attribute for all subsystems that have it."""
 		self._time = t
 		for sys in compress(self._subsystems, self._have_time):
 			sys.time = t
 
-	def __len__(self):
-		return self._num_states
-		
 	@staticmethod
-	def _has_state(sys):
+	def _count_states(sys):
 		try:
-			sys.state
-			return True
+			return len(sys.state)
 		except AttributeError:
-			return False	
+			return 0	
 
 	@staticmethod
 	def _has_time(sys):
@@ -243,21 +272,28 @@ class CompositeSystem(object):
 		except AttributeError:
 			return False
 
-	#replace is extraneous
-	def replace_subsystem(self, index, new_system):
-		self._subsystems[index] = new_system
-		self._have_state[index] = self._has_state(new_system)
-		self._have_time[index] = self._has_time(new_system)
-		self._are_callable[index] = hasattr(new_system, "__call__")
-
 	def add_subsystem(self, index, new_system):
+		"""
+		Starts managing a new subsystem, inserted into the update order
+		at index. All subsequent subsystems are shifted back.
+
+		Usage: [CompositeSystem].add_subsystem(index, new_system)
+		"""
 		self._subsystems.insert(index, new_system)
-		self._have_state.insert(index, self._has_state(new_system))
+		self._dof.insert(index, self._count_states(new_system))
+		self._have_state.insert(index, self._dof[index]>0)
 		self._have_time.insert(index, self._has_time(new_system))
 		self._are_callable.insert(index, hasattr(new_system, "__call__"))
 
 	def remove_subsystem(self, index):
+		"""
+		Ceases to manage the subsystem at index in the update order. All
+		subsequent subsystems are moved up.
+
+		Usage: [CompositeSubsystem].remove_subsystem(index)
+		"""
 		self._subsystems.pop(index)
+		self._dof.pop(index)
 		self._have_state.pop(index)
 		self._have_time.pop(index)
 		self._are_callable.pop(index)
@@ -369,13 +405,15 @@ class ChirpSignal(object):
 	"""
 	Generates a sinusoid with an arbitrary instantaneous frequency.
 	"""
-	def __init__(self, f0, freq_fcn=None, amplitude=2.0, mean=0.0):
+	def __init__(self, freq_fcn=None, mean=0.0, amplitude=2.0):
 		""" 
-		Initialize with the starting frequency ...
-		Frequencies are in rad/s. Instantaneous frequency is 
-		f = f0 + freq_fcn(time) """
+		Initialize with a function that computes frequency from time, 
+		the DC magnitude, the AC magnitude, and a function that computes 
+		frequency from time. Frequencies are in rad/s. 
+
+		Usage: ChirpSignal(freq_fcn=None, mean=0.0, amplitude=2.0)
+		"""
 		self.amplitude, self.mean = amplitude, mean
-		self.f0 = f0 #not the initial frequency!
 		self.time = 0.0
 		if freq_fcn is None:
 			self.freq_fcn = lambda time : time
@@ -385,7 +423,7 @@ class ChirpSignal(object):
 	@property
 	def value(self):
 		""" The current value of the signal. """
-		inst_freq = self.f0 * self.freq_fcn(self.time)
+		inst_freq = self.freq_fcn(self.time)
 		return self.mean + self.amplitude*math.sin(inst_freq*self.time)
 
 #################
@@ -410,15 +448,12 @@ class Filter(object):
 
 	@state.setter
 	def state(self, x):
+		""" Set state and computes the only nontrivial derivative. """
 		self._state = x
-		#Compute the only nontrivial deriviative.
 		#parenthesis for (q,d)?
 		#catch Nonetype exception?
 		self._xndot = ( sum(-q*d for (q,d) in zip(self._state, self._gains)) 
 					  + self._gains[0]*self.signal()) 
-
-	def __len__(self):
-		return self._num_states
 
 	def output(self):
 		return self._state + (self._xndot,)
@@ -507,7 +542,7 @@ class Time(object):
 		self.points = kwargs.get('points')
 		self.span = kwargs.get('span')
 
-	def construct(self):
+	def _construct(self):
 		"""
 		Infer 'initial_time', 'step_size', and/or 'final_time'.
 
@@ -531,7 +566,7 @@ class Time(object):
 								   self.step_size * (self.points-1))
 			else:
 				raise RuntimeError("final_time undefined")
-		if self.inital_time is None:
+		if self.initial_time is None:
 			if self.span is not None:
 				self.initial_time = self.final_time - self.span
 			elif self.points is not None and self.dt is not None:
@@ -550,7 +585,7 @@ class Time(object):
 		Use Time objects as an iterable. Note: 'construct' is called.
 		"""
 		self._construct()
-		current_time = self.inital_time
+		current_time = self.initial_time
 		while current_time <= self.final_time:
 			yield current_time
 			current_time += self.step_size

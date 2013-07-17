@@ -21,6 +21,7 @@
 import time
 import lyapunov
 import solvers
+import numpy
 import matplotlib.pyplot as plt
 
 sys = lyapunov.SimpleDemo()
@@ -52,21 +53,24 @@ print "error ", stepper.error, "slope ", sys()
 
 #Meanwhile, brute force works well.
 sys3 = lyapunov.SlidingDemo()
-sol = lyapunov.Solver(sys3, points=10000)
+sol = lyapunov.Solver(sys3)
+#lyapunov.Time is either slowing things down a LOT or not terminating the loop
+t_in = lyapunov.Time(initial_time=0, points=10000, final_time=3)
 print "\nNo Events, No Sliding - satellite control"
 print "initial state", sys3.state
 start = time.clock()
-sys3.x_out, sys3.t_out = sol.simulate(5)
+sys3.x_out, sys3.t_out = sol.simulate(numpy.arange(0,3,0.001))
 print "time elapsed", time.clock() - start
 sys3.plot()
 
 
 sys4 = lyapunov.SubsystemDemo()
 sol = lyapunov.Solver(sys4)
+t_in.step_size, t_in.points = None, 200
 print "\nMass-Spring-Damper w/PID control"
 print "initial state", sys4.state
 start = time.clock()
-sys4.x_out, sys4.t_out = sol.simulate(10)
+sys4.x_out, sys4.t_out = sol.simulate(t_in)
 print "time elapsed", time.clock() - start
 sys4.plot()
 
@@ -77,10 +81,11 @@ fil.signal = lambda : ref.value
 fil.state = (0.0,)*3
 sys5 = lyapunov.CompositeSystem([ref, fil])
 sol = lyapunov.Solver(sys5)
+t_in.step_size, t_in.final_time = None, 10
 print "\nFilter"
 print "initial state", sys5.state
 start = time.clock()
-x_out, t_out = sol.simulate(10)
+x_out, t_out = sol.simulate(t_in)
 print "time elapsed", time.clock() - start
 plt.figure()
 try:
