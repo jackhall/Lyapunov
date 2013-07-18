@@ -206,7 +206,7 @@ elif "squarewave" in sys.argv:
 	reference = lyapunov.SquareWave(period=10.0, y_lower=-1.0, y_upper=1.0)
 elif "chirp" in sys.argv:
 	t_in.final = 60.0
-	reference = lyapunov.ChirpSignal(f0=0.05, freq_fcn=lambda t:0.2*t)
+	reference = lyapunov.ChirpSignal(freq_fcn=lambda t:0.01*t)
 else:
 	print "defaulting control signal to regulation"
 	t_in.final = 8.0
