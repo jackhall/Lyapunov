@@ -128,7 +128,7 @@ namespace lyapunov {
 		Stepper(boost::python::object sys) 
 		  : system(sys), 
 			saved(false), 
-			num_states( len(system) ), 
+			num_states( len(system.attr("state")) ), 
 			previous_time(0), 
 			previous_state(num_states), 
 			previous_error(num_states), 

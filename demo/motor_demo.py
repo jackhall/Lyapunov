@@ -197,21 +197,21 @@ class SMController(FBLController):
 #		self.controller.x = lambda : self.observer.state
 
 #Choose input function
-points_per_sec = 1000
+t_in = lyapunov.Time(initial=0, step_size=0.001)
 if "step" in sys.argv:
-	final_time = 8.0
-	reference = lyapunov.StepSignal(step_time=2.0, yf=2.0)
+	t_in.final = 8.0
+	reference = lyapunov.StepSignal(step_time=2.0, y_final=2.0)
 elif "squarewave" in sys.argv:
-	final_time = 30.0
+	t_in.final = 30.0
 	reference = lyapunov.SquareWave(period=10.0, y_lower=-1.0, y_upper=1.0)
 elif "chirp" in sys.argv:
-	final_time = 60.0
+	t_in.final = 60.0
 	reference = lyapunov.ChirpSignal(f0=0.05, freq_fcn=lambda t:0.2*t)
 else:
 	print "defaulting control signal to regulation"
-	final_time = 8.0
-	reference = lyapunov.StepSignal(step_time=final_time+1)
-num_points = int(final_time*points_per_sec)
+	t_in.final = 8.0
+	reference = lyapunov.StepSignal(step_time=t_in.final+1)
+t_in._construct()
 
 #Construct subsystems.
 plant = Motor()
@@ -235,7 +235,7 @@ labels = {'reference angle': lambda : reference.value,
 		  'filtered angle': lambda : prefilter.state[0],
 		  'motor angle': lambda : plant.state[3]}
 plant.state = (1.0, 1.0, 0.0, -1.0) #randomize?
-prefilter.state = (0.0,)*len(prefilter)
+prefilter.state = (0.0,)*len(prefilter.state)
 
 if "observe" not in sys.argv:
 	controller.y = plant.output
@@ -266,10 +266,10 @@ print "initial state:", system.state
 #stepper = solvers.Stepper(sys)
 #stepper.step(0.01)
 #print "next state:", sys.state
-print "simulating for", final_time, "sec with", num_points, "points."
+print "simulating for", t_in.span, "sec with", t_in.points, "points."
 start = time.clock()
-sol = lyapunov.Solver(system, points=num_points, plotter=plotter)
-plotter.x, plotter.t = sol.simulate(final_time)
+sol = lyapunov.Solver(system, plotter=plotter)
+plotter.x, plotter.t = sol.simulate(t_in)
 print "final state:", plotter.x[-1]
 print "elapsed time =", time.clock() - start
 

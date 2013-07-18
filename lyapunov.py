@@ -195,6 +195,15 @@ class CompositeSystem(object):
 		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
 		self._num_states = sum(len(sys.state) for sys in 
 							compress(sys_list, self._have_state))
+		if sum(self._have_time):
+			sys_iter = compress(sys_list, self._have_time)
+			self._time = sys_iter.next().time
+			for sys in sys_iter:
+				if sys.time != self._time:
+					print "Subsystem times aren't synchronized yet."
+					break
+		else:
+			self._time = 0
 		#Check to make sure that any system that has state is callable.
 		for has_state, can_call in zip(self._have_state, self._are_callable):
 			if has_state and not can_call:
@@ -228,11 +237,6 @@ class CompositeSystem(object):
 		return tuple(chain.from_iterable(
 					 imap(lambda sys : sys.state, state_iter)))
 
-	@property
-	def subsystems(self):
-		"""Returns a copy of the subsystem list. """
-		return list(self._subsystems)
-
 	@state.setter
 	def state(self, x):
 		"""
@@ -240,8 +244,9 @@ class CompositeSystem(object):
 		corresponding stated subsystems."""
 		a = 0
 		state_iter = compress(self._subsystems, self._have_state) 
-		for i, sys in enumerate(state_iter):
-			b = a + self._dof[i]
+		dof_iter = compress(self._dof, self._have_state)
+		for dof, sys in zip(dof_iter, state_iter):
+			b = a + dof 
 			sys.state = x[a:b]
 			a = b
 		assert b == self._num_states
@@ -429,13 +434,18 @@ class ChirpSignal(object):
 #################
 
 class Filter(object):
-	""" Differentiates a reference signal with a linear filter. The 
-		'output' attribute refers to the complete reference signal. """
+	""" 
+	Differentiates a reference signal with a linear filter. The 
+	'output' attribute refers to the complete reference signal. 
+	"""
+
 	def __init__(self, gains):
-		""" Place poles before constructing. 'gains' is a list of
-			coefficients of the characteristic equation (normalized),
-			from lowest-highest order. Exclude the highest, since it 
-			should be equal to one anyway. """
+		""" 
+		Place poles before constructing. 'gains' is a list of
+		coefficients of the characteristic equation (normalized),
+		from lowest-highest order. Exclude the highest, since it 
+		should be equal to one anyway. 
+		"""
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
 		self._gains = gains #check signs?
@@ -512,9 +522,9 @@ class Time(object):
 	of these attributes need to be defined before a given instance
 	is used as an iterable (like during a simulation):
 
-	--initial_time
+	--initial
 	--step_size
-	--final_time
+	--final
 	--points (an int)
 	--span
 
@@ -528,53 +538,53 @@ class Time(object):
 		"""
 		Accepts any of the following keyword arguments:
 
-		--initial_time
+		--initial
 		--step_size
-		--final_time
+		--final
 		--points (an int)
 		--span
 
 		Provided arguments are assigned to the relevant data attributes.
 		"""
-		self.initial_time = kwargs.get('initial_time')
+		self.initial = kwargs.get('initial')
 		self.step_size = kwargs.get('step_size')
-		self.final_time = kwargs.get('final_time')
+		self.final = kwargs.get('final')
 		self.points = kwargs.get('points')
 		self.span = kwargs.get('span')
 
 	def _construct(self):
 		"""
-		Infer 'initial_time', 'step_size', and/or 'final_time'.
+		Infer 'initial', 'step_size', and/or 'final'.
 
 		Usage: [Time].construct()
 
-		If any of the primary attributes ('initial_time', 'final_time', and
+		If any of the primary attributes ('initial', 'final', and
 		'step_size') are not provided, the method will attempt to infer them 
 		from secondary attributes ('span', 'points'). In case of conflict,
 		information from primary attributes is preferred, and secondary 
 		attributes will be made consistent.
 		"""
-		if self.final_time is None and self.inital_time is None:
+		if self.final is None and self.inital_time is None:
 			raise RuntimeError("No absolute time information given.")
 		if self.step_size is None and self.points is None:
 			raise RuntimeError("No time sparseness/density information given.")
-		if self.final_time is None:
+		if self.final is None:
 			if self.span is not None:
-				self.final_time = self.initial_time + self.span
+				self.final = self.initial + self.span
 			elif self.points is not None and self.dt is not None:
-				self.final_time = (self.initial_time + 
+				self.final = (self.initial + 
 								   self.step_size * (self.points-1))
 			else:
-				raise RuntimeError("final_time undefined")
-		if self.initial_time is None:
+				raise RuntimeError("final undefined")
+		if self.initial is None:
 			if self.span is not None:
-				self.initial_time = self.final_time - self.span
+				self.initial = self.final - self.span
 			elif self.points is not None and self.dt is not None:
-				self.initial_time = (self.final_time - 
+				self.initial = (self.final - 
 									 self.step_size * (self.points-1))
 			else:
-				raise RuntimeError("initial_time undefined")
-		self.span = self.final_time - self.initial_time
+				raise RuntimeError("initial undefined")
+		self.span = self.final - self.initial
 		if self.step_size is None:
 			self.step_size = self.span / self.points
 		else:
@@ -585,10 +595,8 @@ class Time(object):
 		Use Time objects as an iterable. Note: 'construct' is called.
 		"""
 		self._construct()
-		current_time = self.initial_time
-		while current_time <= self.final_time:
-			yield current_time
-			current_time += self.step_size
+		for t in numpy.linspace(self.initial, self.final, self.points):
+			yield t
 
 
 class Solver(object):
@@ -669,8 +677,12 @@ class Solver(object):
 		before 'simulate' was called.
 		"""
 		#Initialize system
-		autonomous = not hasattr(self.system, 'time')
-		if not autonomous:
+		try:
+			self.system.time
+		except AttributeError:
+			autonomous = True
+		else:
+			autonomous = False
 			original_time = self.system.time
 		#need code here that works with generators AND containers
 		time = iter(time)
