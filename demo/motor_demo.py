@@ -187,15 +187,6 @@ class SMController(FBLController):
 		self._control_effort = self._u_eq() + u_d
 
 
-#class SMCObsrv(FBLObsrv):
-#	def __init__(self):
-#		FBLObsrv.__init__(self)
-#		self.controller = SMController(self.plant)
-#		self.plant.u = self.observer.u = self.controller.u
-#		self.controller.r = self.prefilter.output
-#		self.controller.y = self.plant.output
-#		self.controller.x = lambda : self.observer.state
-
 #Choose input function
 t_in = lyapunov.Time(initial=0, step_size=0.001)
 if "step" in sys.argv:

@@ -472,14 +472,24 @@ class Filter(object):
 		return self._state[1:] + (self._xndot,)
 
 
+class StopSolving(Exception):
+	""" 
+	Exception to be thrown when the system encounters an
+	Event and needs to stop integrating.
+	"""
+
+	def __iter__(self, name=""):
+		self.name = name
+
+	def __str__(self):
+		return repr(self.name)
+
+
 class Event(object):
 	""" A terminal event - stops solving before a sign change """
 	def __init__(self, name, function):
 		self.name = name 
-		self.function = function
-
-	def __call__(self):
-		return self.function()
+		self.__call__ = function
 
 	@property
 	def flag(self):
@@ -488,31 +498,64 @@ class Event(object):
 	@flag.setter
 	def flag(self, x):
 		if x is True:
-			raise RuntimeError(self.name)
+			raise StopSolving(self.name)
+
+def event(function):
+	return Event(function.__name__, function)
 
 
 class Mode(object):
 	""" A persistent mode, with entry and exit functions """
-	def __init__(self, name, enter, exit, active=False):
+	def __init__(self, entry, **kwargs):
 		""" enter and exit should take no arguments and each return a float
 		    that changes sign when an event occurs	"""
-		self.name = name
-		self.enter, self.exit = enter, exit
-		self.flag = active 
-		#self.terminal = terminal #whether or not solver halts
+		self.fentry = entry
+		nil = lambda: None
+		self.fapply = kwargs['apply'] if 'apply' in kwargs else nil
+		self.fexit = kwargs['exit'] if 'exit' in kwargs else entry
+		self.fignore = kwargs['ignore'] if 'ignore' in kwargs else nil
+		self._flag = kwargs['active'] if 'active' in kwargs else False
+		self.__call__ = exit if self._flag else entry
 
-	def __call__(self):
-		if self.flag:
-			return self.exit()
+	@property
+	def flag(self):
+		return self._flag
+
+	@flag.setter
+	def flag(self, x):
+		if self._flag:
+			assert not x
+			self.fignore()
+			self.__call__ = self.fentry
 		else:
-			return self.enter()
+			assert x
+			self.fapply()
+			self.__call__ = self.fexit
+		self._flag = x
+
+	def apply(function):
+		self.fapply = function
+
+	def exit(function):
+		self.fexit = function
+
+	def ignore(function):
+		self.fignore = function
+
+def mode(function):
+	return Mode(function)
+	
 
 #Event and Mode represent terminal and sticking events, respectively.
 #Remember to flag an event as active just before stepping through the boundary!
 #Make sure to catch the error properly in order to return state history!
 #A common interface for setting system mode is needed. Must work with 
 #CompositeSystem and be reasonably easy to emulate.
-#Ask user to define a function to alter the system.
+#Ask user to define a function to alter the system?
+
+#decorators now implemented
+#Have just one Event class with features of Mode?
+#Associate events with system or solver? Are nested systems easy?
 
 class Time(object):
 	"""
