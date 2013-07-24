@@ -472,7 +472,7 @@ class Filter(object):
 		return self._state[1:] + (self._xndot,)
 
 
-class StopSolving(Exception):
+class StopIntegration(Exception):
 	""" 
 	Exception to be thrown when the system encounters an
 	Event and needs to stop integrating.
@@ -485,9 +485,15 @@ class StopSolving(Exception):
 		return repr(self.name)
 
 
-class Event(object):
+#require __call__() for event function
+#require flag() method to return new event (or None) or raise StopIntegration
+#associate events with a given system? no need with chaining
+#Remember to flag an event as active just before stepping through the boundary!
+#Make sure to catch the error properly in order to return state history!
+
+class Event(type):
 	""" A terminal event - stops solving before a sign change """
-	def __init__(self, name, function):
+	def __init__(self, function, name="event"):
 		self.name = name 
 		self.__call__ = function
 
@@ -500,8 +506,15 @@ class Event(object):
 		if x is True:
 			raise StopSolving(self.name)
 
+#don't mix function and class decorators!
+#with above design, decorators may not be needed
 def event(function):
-	return Event(function.__name__, function)
+	class _event(object):
+		def __init__(self, system):
+			self.system = system
+		def __call__(self):
+			return function(self.system)
+	return _event(function, function.__name__)
 
 
 class Mode(object):
@@ -545,17 +558,6 @@ class Mode(object):
 def mode(function):
 	return Mode(function)
 	
-
-#Event and Mode represent terminal and sticking events, respectively.
-#Remember to flag an event as active just before stepping through the boundary!
-#Make sure to catch the error properly in order to return state history!
-#A common interface for setting system mode is needed. Must work with 
-#CompositeSystem and be reasonably easy to emulate.
-#Ask user to define a function to alter the system?
-
-#decorators now implemented
-#Have just one Event class with features of Mode?
-#Associate events with system or solver? Are nested systems easy?
 
 class Time(object):
 	"""
