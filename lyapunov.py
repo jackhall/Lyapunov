@@ -675,7 +675,7 @@ class Solver(object):
 	Should events be associated with system or solver?
 	"""
 
-	def __init__(self, system, plotter=None):
+	def __init__(self, system, plotter=None, events=[]):
 		"""
 		Instantiate an ODE solver for a given system.
 
@@ -690,24 +690,15 @@ class Solver(object):
 		"""
 		#events and rootfinding options omitted for now
 		#is there a way to make plotter modular wrt system?
-		self.system = system
+		self.system = system #has state and __call__() [time optional]
 		self.plotter = plotter #has a update()
+		self.events = events #each has __call__() and flag()
 		self.stepper = solvers.Stepper(system) #where does Stepper come from?
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
 		if not hasattr(system, '__call__'):
 			raise AttributeError("Need to compute state derivatives")
 
-	#@property
-	#def min_ratio(self):
-	#	return self._min_step_ratio
-
-	#@min_ratio.setter
-	#def min_ratio(self, new_min_ratio):
-	#	if new_min_ratio > 1:
-	#		self._min_step_ratio = 1.0 / new_min_ratio
-	#	else:
-	#		self._min_step_ratio = new_min_ratio
 
 	def simulate(self, time, initial_state=None):
 		"""
@@ -735,12 +726,26 @@ class Solver(object):
 		original_state = self.system.state
 		if initial_state is not None:
 			self.system.state = initial_state
+		#Configure for events
+		events_provided = len(self.events) > 0
+		sign_change = lambda f, e: f()*e < 0 #only used if events provided
 		#Initialize recording
-		x_out = [self.system.state]
-		t_out = [self.system.time]
-		if self.plotter is not None:
-			self.plotter.update()
-		#main solver loop
+		class Recorder(object):
+			def __init__(self, system, plotter):
+				self.x_out = [system.state]
+				self.t_out = [system.time]
+				self.plotter = plotter
+
+			def __call__(self, system):
+				self.x_out.append(system.state)
+				self.t_out.append(system.time)
+				if self.plotter is not None:
+					self.plotter.update()
+
+		recorder = Recorder()
+		recorder(self.system)
+
+		#main solver loop (might be cleaner as a recursion)
 		for t in time:
 			#Step forward in time.
 			self.stepper.step(t - self.system.time) 
@@ -749,23 +754,27 @@ class Solver(object):
 				print "System state is NaN!"
 				pdb.set_trace()
 			#Detect an event - defined as a change in sign.
-			#if events_provided:
-			#	if self.system.mode != current_mode:
-			#		self.stepper.find_root(step_size, 
-			#							   step_size*self.min_ratio)
-			#		current_mode = str(self.system.mode)
+			if events_provided:
+				occurred = imap(sign_change, self.events, event_values)
+				active_events = compress(self.events, occurred)
+				if len(active_events) > 0:
+					try:
+						#find_root should update self.events
+						self.stepper.find_root(self.events)
+					except StopIntegration:
+						#clean up after simulation and exit
+						recorder(self.system)
+						break
+				event_values = [f() for f in self.events] #for next step
 			#Record state and output information
-			x_out.append(self.system.state)
-			t_out.append(self.system.time)
-			if self.plotter is not None:
-				self.plotter.update()
+			recorder(self.system)
 		#Reset system to original conditions (before 'simulate' was called)
 		self.system.state = original_state
 		if autonomous:
 		 	del self.system.time
 		else:
 			self.system.time = original_time
-		return numpy.array(x_out), numpy.array(t_out)
+		return numpy.array(recorder.x_out), numpy.array(recorder.t_out)
 			
 
 class Plotter(object):
