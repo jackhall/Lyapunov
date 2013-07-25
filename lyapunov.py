@@ -746,34 +746,38 @@ class Solver(object):
 		recorder(self.system)
 
 		#main solver loop (might be cleaner as a recursion)
-		for t in time:
-			#Step forward in time.
-			self.stepper.step(t - self.system.time) 
-			#Check to make sure system states have not become invalid.
-			if True in map(math.isnan, self.system.state):
-				print "System state is NaN!"
-				pdb.set_trace()
-			#Detect an event - defined as a change in sign.
-			if events_provided:
-				occurred = imap(sign_change, self.events, event_values)
-				active_events = compress(self.events, occurred)
-				if len(active_events) > 0:
-					try:
-						#find_root should update self.events
-						self.stepper.find_root(self.events)
-					except StopIntegration:
-						#clean up after simulation and exit
-						recorder(self.system)
-						break
-				event_values = [f() for f in self.events] #for next step
-			#Record state and output information
-			recorder(self.system)
-		#Reset system to original conditions (before 'simulate' was called)
-		self.system.state = original_state
-		if autonomous:
-		 	del self.system.time
-		else:
-			self.system.time = original_time
+		try:
+			while True:
+				#Step forward in time.
+				if abs(self.system.time - next_time) < epsilon:
+					next_time = time.next()
+				self.stepper.step(t - self.system.time) 
+				#Check to make sure system states have not become invalid.
+				if True in map(math.isnan, self.system.state):
+					print "System state is NaN!"
+					pdb.set_trace()
+				#Detect an event - defined as a change in sign.
+				if events_provided:
+					occurred = imap(sign_change, self.events, event_values)
+					active_events = compress(self.events, occurred)
+					if len(active_events) > 0:
+						try:
+							#find_root should update self.events
+							self.stepper.find_root(self.events)
+						except StopIntegration:
+							#clean up after simulation and exit
+							recorder(self.system)
+							break
+					event_values = [f() for f in self.events] #for next step
+				#Record state and output information
+				recorder(self.system)
+		except StopIteration:
+			#Reset system to original conditions (before 'simulate' was called)
+			self.system.state = original_state
+			if autonomous:
+				del self.system.time
+			else:
+				self.system.time = original_time
 		return numpy.array(recorder.x_out), numpy.array(recorder.t_out)
 			
 
