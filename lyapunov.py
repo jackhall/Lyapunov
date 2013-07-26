@@ -654,16 +654,107 @@ class EventHandler(object):
 	def _sign_change(f, value): 
 		return f()*value < 0 
 
-	def find(self):
+	def detect(self, stepper):
 		if self.defined:
 			occurred = imap(self._sign_change, self.events, self.values)
 			active_events = compress(self.events, occurred)
-			return len(active_Events) > 0
+			return len(active_events) > 0
 		else:
 			return False
+		#perform rootfind
+		self.values = [f() for f in self.events] #for next step
+
+
+#What is the best way to record events? Does [Recorder].update neet to be 
+#passed an EventHandler object? Probably not, because the object
+#[Solver].events is bound to will not change over the course of integration,
+#where [Solver].system might (parts of the code don't fit this assumption!).
+#Should the recorder concept include an events interface? 
+
+class Recorder(object):
+	"""
+	Records system data during a Solver simulation through callbacks.
+
+	Use Plotter to record arbitrary system data during a simulation and
+	plot it afterwards. This object is instantiated with a dictionary 
+	mapping string variable names to callback functions. These functions
+	will be called with no arguments at each iteration of a solving loop 
+	to retrieve some scalar value. Using lambdas or system methods is  
+	usually convenient.
+
+	After simulation, call either 'time_response' or 'phase_portrait' to
+	plot. The former will plot all recorded quantities against time. The
+	latter should be called with two labels, which tell it which two 
+	variables to plot against each other.
+
+	Calling 'clear' will preserve labels and callbacks, but delete all saved
+	variable data.
+	"""
+	#Update to use object-oriented interface from matplotlib. 
+	#Use 3-tiered dict to store labels: figures, subfigures, lines?
+	#Flat is better than nested. 
+	def __init__(self, system, labels):
+		"""
+		Create a Plotter from a dict mapping variable labels to 
+		callback functions. The callback functions should be callable
+		with no argments and return a scalar numeric. 
+		"""
+		#labels is a dict ... explain
+		self.system = system 
+		self.labels = labels 
+		self.lines = {label: [] for label in labels.keys()}
+		self.time = []
+		self.state = []
 
 	def update(self):
-		self.values = [f() for f in self.events] #for next step
+		"""
+		Call with no arguments to record system variables at the 
+		current state and time. Usually only used by 'Solver.simulate'.
+		"""
+		self.time.append(self.system.time)
+		self.state.append(self.system.state)
+		for label, f in self.labels.iteritems():
+			self.lines[label].append(f())
+
+	def clear(self):
+		"""
+		Call with no arguments to erase all saved records of state
+		variables. The callback functions and the labels themselves 
+		remain.
+		"""
+		self.time = []
+		self.state = []
+		for label in self.lines:
+			self.lines[label] = []
+
+	def time_response(self):
+		"""
+		Plots all saved records of system variables against time. String
+		labels are given in the legend. 
+		"""
+		plt.figure()
+		for label, data in self.lines.iteritems():
+			plt.plot(self.time, numpy.array(data), label=label)
+		plt.xlabel("time (s)")
+		plt.legend()
+		plt.show()
+
+	def phase_portrait(self, xlabel, ylabel):
+		"""
+		Plots the phase space trajectory of two system variables. This
+		means that they are plotted against each other for the currently
+		saved trajectory. The underlying vector field is NOT plotted, as
+		that would involve computing derivatives (which are not saved). 
+		Furthermore, the vector field could only be evaluated as a function
+		for a second-order autonomous system.
+		"""
+		#does not evaluate derivatives! explain
+		plt.figure()
+		plt.plot(numpy.array(self.lines[xlabel]), 
+				 numpy.array(self.lines[ylabel]))
+		plt.xlabel(xlabel)
+		plt.ylabel(ylabel)
+		plt.show()
 
 
 class Solver(object):
@@ -748,25 +839,14 @@ class Solver(object):
 		if initial_state is not None:
 			self.system.state = initial_state
 		#Configure for events
+		#use EventHandler object
 		events_provided = len(self.events) > 0
 		sign_change = lambda f, e: f()*e < 0 #only used if events provided
 		#Initialize recording
-		class Recorder(object):
-			def __init__(self, system, plotter):
-				self.x_out = [system.state]
-				self.t_out = [system.time]
-				self.plotter = plotter
-
-			def __call__(self, system):
-				self.x_out.append(system.state)
-				self.t_out.append(system.time)
-				if self.plotter is not None:
-					self.plotter.update()
-
 		recorder = Recorder()
-		recorder(self.system)
+		recorder.update(self.system)
 
-		#main solver loop (might be cleaner as a recursion)
+		#main solver loop 
 		try:
 			while True:
 				#Step forward in time.
@@ -781,107 +861,23 @@ class Solver(object):
 				if event_handler.find():
 					
 				#Record state and output information
-				recorder(self.system)
-		except StopIteration:
+				recorder.update(self.system)
+		except StopIteration, StopIntegration:
 			#Reset system to original conditions (before 'simulate' was called)
 			self.system.state = original_state
 			if autonomous:
 				del self.system.time
 			else:
 				self.system.time = original_time
-		return numpy.array(recorder.x_out), numpy.array(recorder.t_out)
 			
 
-class Plotter(object):
-	"""
-	Records system data during a Solver simulation through callbacks.
-
-	Use Plotter to record arbitrary system data during a simulation and
-	plot it afterwards. This object is instantiated with a dictionary 
-	mapping string variable names to callback functions. These functions
-	will be called with no arguments at each iteration of a solving loop 
-	to retrieve some scalar value. Using lambdas or system methods is  
-	usually convenient.
-
-	After simulation, call either 'time_response' or 'phase_portrait' to
-	plot. The former will plot all recorded quantities against time. The
-	latter should be called with two labels, which tell it which two 
-	variables to plot against each other.
-
-	Calling 'clear' will preserve labels and callbacks, but delete all saved
-	variable data.
-	"""
-	#Update to use object-oriented interface from matplotlib. 
-	#Use 3-tiered dict to store labels: figures, subfigures, lines?
-	#Flat is better than nested. 
-	def __init__(self, system, labels):
-		"""
-		Create a Plotter from a dict mapping variable labels to 
-		callback functions. The callback functions should be callable
-		with no argments and return a scalar numeric. 
-		"""
-		#labels is a dict ... explain
-		self.system = system #only used for time & reconstruct
-		self.labels = labels 
-		self.lines = {label: [] for label in labels.iterkeys()}
-		self.time = []
-
-	def update(self):
-		"""
-		Call with no arguments to record system variables at the 
-		current state and time. Usually only used by 'Solver.simulate'.
-		"""
-		self.time.append(self.system.time)
-		for label, f in self.labels.iteritems():
-			self.lines[label].append(f())
-
-	def clear(self):
-		"""
-		Call with no arguments to erase all saved records of state
-		variables. The callback functions and the labels themselves 
-		remain.
-		"""
-		self.time = []
-		for label in self.lines:
-			self.lines[label] = []
-
-	def time_response(self):
-		"""
-		Plots all saved records of system variables against time. String
-		labels are given in the legend. 
-		"""
-		plt.figure()
-		for label, data in self.lines.iteritems():
-			plt.plot(self.time, numpy.array(data), label=label)
-		plt.xlabel("time (s)")
-		plt.legend()
-		plt.show()
-
-	def phase_portrait(self, xlabel, ylabel):
-		"""
-		Plots the phase space trajectory of two system variables. This
-		means that they are plotted against each other for the currently
-		saved trajectory. The underlying vector field is NOT plotted, as
-		that would involve computing derivatives (which are not saved). 
-		Furthermore, the vector field could only be evaluated as a function
-		for a second-order autonomous system.
-		"""
-		#does not evaluate derivatives! explain
-		plt.figure()
-		plt.plot(numpy.array(self.lines[xlabel]), 
-				 numpy.array(self.lines[ylabel]))
-		plt.xlabel(xlabel)
-		plt.ylabel(ylabel)
-		plt.show()
-	
-
-class PlotterList(object):
-	def __init__(self, plt_list):
-		self.plotters = plt_list
-
-	def update(self):
-		for plotter in self.plotters:
-			plotter.update()
+#class PlotterList(object):
+#	def __init__(self, plt_list):
+#		self.plotters = plt_list
+#
+#	def update(self):
+#		for plotter in self.plotters:
+#			plotter.update()
 
 
 	#def phase_portrait(self):
