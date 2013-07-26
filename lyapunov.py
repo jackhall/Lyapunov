@@ -644,6 +644,28 @@ class Time(object):
 			yield t
 
 
+class EventHandler(object):
+	def __init__(self, events):
+		self.events = events
+		self.defined = len(events) > 0
+		self.update()
+
+	@staticmethod
+	def _sign_change(f, value): 
+		return f()*value < 0 
+
+	def find(self):
+		if self.defined:
+			occurred = imap(self._sign_change, self.events, self.values)
+			active_events = compress(self.events, occurred)
+			return len(active_Events) > 0
+		else:
+			return False
+
+	def update(self):
+		self.values = [f() for f in self.events] #for next step
+
+
 class Solver(object):
 	"""
 	An ODE solver object for numerically integrating system objects.
@@ -699,7 +721,6 @@ class Solver(object):
 		if not hasattr(system, '__call__'):
 			raise AttributeError("Need to compute state derivatives")
 
-
 	def simulate(self, time, initial_state=None):
 		"""
 		Numerically integrates the system over the given time iterable.
@@ -751,24 +772,14 @@ class Solver(object):
 				#Step forward in time.
 				if abs(self.system.time - next_time) < epsilon:
 					next_time = time.next()
-				self.stepper.step(t - self.system.time) 
+				self.stepper.step(next_time - self.system.time) 
 				#Check to make sure system states have not become invalid.
 				if True in map(math.isnan, self.system.state):
 					print "System state is NaN!"
 					pdb.set_trace()
 				#Detect an event - defined as a change in sign.
-				if events_provided:
-					occurred = imap(sign_change, self.events, event_values)
-					active_events = compress(self.events, occurred)
-					if len(active_events) > 0:
-						try:
-							#find_root should update self.events
-							self.stepper.find_root(self.events)
-						except StopIntegration:
-							#clean up after simulation and exit
-							recorder(self.system)
-							break
-					event_values = [f() for f in self.events] #for next step
+				if event_handler.find():
+					
 				#Record state and output information
 				recorder(self.system)
 		except StopIteration:
