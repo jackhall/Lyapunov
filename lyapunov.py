@@ -491,74 +491,6 @@ class StopIntegration(Exception):
 #Remember to flag an event as active just before stepping through the boundary!
 #Make sure to catch the error properly in order to return state history!
 
-class Event(type):
-	""" A terminal event - stops solving before a sign change """
-	def __init__(self, function, name="event"):
-		self.name = name 
-		self.__call__ = function
-
-	@property
-	def flag(self):
-		return False
-
-	@flag.setter
-	def flag(self, x):
-		if x is True:
-			raise StopSolving(self.name)
-
-#don't mix function and class decorators!
-#with above design, decorators may not be needed
-def event(function):
-	class _event(object):
-		def __init__(self, system):
-			self.system = system
-		def __call__(self):
-			return function(self.system)
-	return _event(function, function.__name__)
-
-
-class Mode(object):
-	""" A persistent mode, with entry and exit functions """
-	def __init__(self, entry, **kwargs):
-		""" enter and exit should take no arguments and each return a float
-		    that changes sign when an event occurs	"""
-		self.fentry = entry
-		nil = lambda: None
-		self.fapply = kwargs['apply'] if 'apply' in kwargs else nil
-		self.fexit = kwargs['exit'] if 'exit' in kwargs else entry
-		self.fignore = kwargs['ignore'] if 'ignore' in kwargs else nil
-		self._flag = kwargs['active'] if 'active' in kwargs else False
-		self.__call__ = exit if self._flag else entry
-
-	@property
-	def flag(self):
-		return self._flag
-
-	@flag.setter
-	def flag(self, x):
-		if self._flag:
-			assert not x
-			self.fignore()
-			self.__call__ = self.fentry
-		else:
-			assert x
-			self.fapply()
-			self.__call__ = self.fexit
-		self._flag = x
-
-	def apply(function):
-		self.fapply = function
-
-	def exit(function):
-		self.fexit = function
-
-	def ignore(function):
-		self.fignore = function
-
-def mode(function):
-	return Mode(function)
-	
-
 class Time(object):
 	"""
 	An iterable that acts like a time list.
@@ -645,25 +577,36 @@ class Time(object):
 
 
 class EventHandler(object):
-	def __init__(self, events):
-		self.events = events
-		self.defined = len(events) > 0
-		self.update()
+	"""
+	EventHandler encapsulates all event detection behavior. 'detect' is called
+	at each time step, and when it returns the stepper and system should be 
+	ready to continue.
 
-	@staticmethod
-	def _sign_change(f, value): 
-		return f()*value < 0 
+	The event concept requires the object to be callable for a floating point
+	number, have a flag method with no arguments that returns a new list of
+	events, and have a boolean called step_through that specifies whether to
+	call flag before stepping through an event boundary or after. Another
+	EventHandler need only provide 'detect'.
+	"""
+
+	def __init__(self, events=[]):
+		self.events = events #a list
+		self.defined = len(events) > 0
+		self.update_values()
 
 	def detect(self, stepper):
 		if self.defined:
-			occurred = imap(self._sign_change, self.events, self.values)
+			occurred = imap(lambda f, e: f()*e < 0, self.events, self.values)
 			active_events = compress(self.events, occurred)
-			return len(active_events) > 0
-		else:
-			return False
-		#perform rootfind
-		self.values = [f() for f in self.events] #for next step
+			if len(active_events) > 0:
+				this_event = stepper.find_root(self.events)
+				self.events = this_event.flag()
+				self.defined = len(self.events) > 0
+			self.update_values()
 
+	def update_values(self):
+		self.values = [f() for f in self.events] #for next step
+		
 
 #What is the best way to record events? Does [Recorder].update neet to be 
 #passed an EventHandler object? Probably not, because the object
@@ -706,7 +649,7 @@ class Recorder(object):
 		self.time = []
 		self.state = []
 
-	def update(self):
+	def record(self):
 		"""
 		Call with no arguments to record system variables at the 
 		current state and time. Usually only used by 'Solver.simulate'.
@@ -788,7 +731,7 @@ class Solver(object):
 	Should events be associated with system or solver?
 	"""
 
-	def __init__(self, system, plotter=None, events=[]):
+	def __init__(self, system, plotter=None, event_handler=EventHandler()):
 		"""
 		Instantiate an ODE solver for a given system.
 
@@ -797,14 +740,14 @@ class Solver(object):
 		A minimal system object is required to instantiate a Solver. 
 		AttributeErrors will be raised if the system concept is incomplete.
 
-		A plotter object (anything that provides an 'update' method that 
+		A plotter object (anything that provides an 'record' method that 
 		takes no arguments) is optional for simulation, but can also be 
 		provided here.
 		"""
 		#events and rootfinding options omitted for now
 		#is there a way to make plotter modular wrt system?
 		self.system = system #has state and __call__() [time optional]
-		self.plotter = plotter #has a update()
+		self.plotter = plotter #has a record()
 		self.events = events #each has __call__() and flag()
 		self.stepper = solvers.Stepper(system) #where does Stepper come from?
 		#Check basic requirements of a system object...
@@ -844,7 +787,7 @@ class Solver(object):
 		sign_change = lambda f, e: f()*e < 0 #only used if events provided
 		#Initialize recording
 		recorder = Recorder()
-		recorder.update(self.system)
+		recorder.record(self.system)
 
 		#main solver loop 
 		try:
@@ -861,7 +804,7 @@ class Solver(object):
 				if event_handler.find():
 					
 				#Record state and output information
-				recorder.update(self.system)
+				recorder.record(self.system)
 		except StopIteration, StopIntegration:
 			#Reset system to original conditions (before 'simulate' was called)
 			self.system.state = original_state
