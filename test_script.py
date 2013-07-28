@@ -59,7 +59,8 @@ t_in = lyapunov.Time(initial=0, points=10000, final=3)
 print "\nNo Events, No Sliding - satellite control"
 print "initial state", sys3.state
 start = time.clock()
-sys3.x_out, sys3.t_out = sol.simulate(t_in)
+record = sol.simulate(t_in)
+sys3.x_out, sys3.t_out = numpy.array(record.state), numpy.array(record.time)
 print "time elapsed", time.clock() - start
 sys3.plot()
 
@@ -70,7 +71,8 @@ t_in.step_size, t_in.points = None, 200
 print "\nMass-Spring-Damper w/PID control"
 print "initial state", sys4.state
 start = time.clock()
-sys4.x_out, sys4.t_out = sol.simulate(t_in)
+record = sol.simulate(t_in)
+sys4.x_out, sys4.t_out = numpy.array(record.state), numpy.array(record.time)
 print "time elapsed", time.clock() - start
 sys4.plot()
 
@@ -85,7 +87,8 @@ t_in.step_size, t_in.final = None, 10
 print "\nFilter"
 print "initial state", sys5.state
 start = time.clock()
-x_out, t_out = sol.simulate(t_in)
+record = sol.simulate(t_in)
+x_out, t_out = numpy.array(record.state), numpy.array(record.time)
 print "time elapsed", time.clock() - start
 plt.figure()
 try:

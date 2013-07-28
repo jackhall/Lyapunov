@@ -58,6 +58,7 @@ in whatever system directory python looks in to import external modules.
 #
 #The author may be reached at jackhall@utexas.edu.
 
+import sys
 import math
 import pdb
 from itertools import chain, compress, imap
@@ -65,7 +66,6 @@ import operator
 import numpy
 import matplotlib.pyplot as plt
 import solvers
-
 
 class SimpleDemo(object):
 	"""Mass spring damper system."""
@@ -594,12 +594,10 @@ class EventHandler(object):
 		self.defined = len(events) > 0
 		self.update_values()
 
-	def detect(self, stepper):
+	def detect(self, rootfinder):
 		if self.defined:
-			occurred = imap(lambda f, e: f()*e < 0, self.events, self.values)
-			active_events = compress(self.events, occurred)
-			if len(active_events) > 0:
-				this_event = stepper.find_root(self.events)
+			if True in map(lambda f, e: f()*e < 0, self.events, self.values):
+				this_event = rootfinder(self.events)
 				self.events = this_event.flag()
 				self.defined = len(self.events) > 0
 			self.update_values()
@@ -636,7 +634,7 @@ class Recorder(object):
 	#Update to use object-oriented interface from matplotlib. 
 	#Use 3-tiered dict to store labels: figures, subfigures, lines?
 	#Flat is better than nested. 
-	def __init__(self, system, labels):
+	def __init__(self, system, labels={}):
 		"""
 		Create a Plotter from a dict mapping variable labels to 
 		callback functions. The callback functions should be callable
@@ -731,7 +729,7 @@ class Solver(object):
 	Should events be associated with system or solver?
 	"""
 
-	def __init__(self, system, plotter=None, event_handler=EventHandler()):
+	def __init__(self, system, recorder=None, event_handler=None):
 		"""
 		Instantiate an ODE solver for a given system.
 
@@ -744,12 +742,13 @@ class Solver(object):
 		takes no arguments) is optional for simulation, but can also be 
 		provided here.
 		"""
-		#events and rootfinding options omitted for now
-		#is there a way to make plotter modular wrt system?
+		#need a better way to bypass EventHandler by default
+		#need a better way to integrate events and recording
 		self.system = system #has state and __call__() [time optional]
-		self.plotter = plotter #has a record()
-		self.events = events #each has __call__() and flag()
-		self.stepper = solvers.Stepper(system) #where does Stepper come from?
+		self.recorder = Recorder(system) if recorder is None else recorder
+		self.event_handler = (EventHandler() if event_handler is None else 
+							  event_handler) #has detect(find_root)
+		self.stepper = solvers.Stepper(system) #needs 'step' [and 'find_root']
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
 		if not hasattr(system, '__call__'):
@@ -774,44 +773,46 @@ class Solver(object):
 			autonomous = True
 		else:
 			autonomous = False
-			original_time = self.system.time
+			original_time = self.system.time #thus system.time is reserved!
 		#need code here that works with generators AND containers
 		time = iter(time)
-		self.system.time = time.next() #means that system.time is reserved!
+		self.system.time = time.next() 
+		next_time = time.next()
 		original_state = self.system.state
 		if initial_state is not None:
 			self.system.state = initial_state
-		#Configure for events
-		#use EventHandler object
-		events_provided = len(self.events) > 0
-		sign_change = lambda f, e: f()*e < 0 #only used if events provided
-		#Initialize recording
-		recorder = Recorder()
-		recorder.record(self.system)
-
 		#main solver loop 
 		try:
 			while True:
+				#Record state and output information
+				self.recorder.record()
 				#Step forward in time.
-				if abs(self.system.time - next_time) < epsilon:
+				#This floating point comparison has an edge case across
+				#zero that I'm not handling. Most people will be simulating
+				#from zero in any case. Should I never step forward after
+				#an event has occurred?
+				if abs((self.system.time - next_time) 
+						/ next_time) < sys.float_info.epsilon:
+					#Event handler may have left the previous step incomplete.
 					next_time = time.next()
 				self.stepper.step(next_time - self.system.time) 
 				#Check to make sure system states have not become invalid.
 				if True in map(math.isnan, self.system.state):
-					print "System state is NaN!"
-					pdb.set_trace()
+					raise ArithmeticError("System state is NaN!")
 				#Detect an event - defined as a change in sign.
-				if event_handler.find():
-					
-				#Record state and output information
-				recorder.record(self.system)
-		except StopIteration, StopIntegration:
-			#Reset system to original conditions (before 'simulate' was called)
-			self.system.state = original_state
-			if autonomous:
-				del self.system.time
-			else:
-				self.system.time = original_time
+				self.event_handler.detect(self.stepper.find_root)
+		except StopIteration:
+			pass
+		except StopIntegration as e:
+			self.recorder.record()
+	  		print e
+		#Reset system to original conditions (before 'simulate' was called)
+		self.system.state = original_state
+		if autonomous:
+			del self.system.time
+		else:
+			self.system.time = original_time
+		return self.recorder
 			
 
 #class PlotterList(object):

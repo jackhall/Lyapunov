@@ -250,7 +250,7 @@ else:
 if "showu" in sys.argv:
 	#labels['control effort'] = controller.u
 	labels['u_eqivalent'] = controller._u_eq
-plotter = lyapunov.Plotter(system, labels)
+recorder = lyapunov.Recorder(system, labels)
 
 #Simulate
 print "initial state:", system.state
@@ -259,21 +259,23 @@ print "initial state:", system.state
 #print "next state:", sys.state
 print "simulating for", t_in.span, "sec with", t_in.points, "points."
 start = time.clock()
-sol = lyapunov.Solver(system, plotter=plotter)
-plotter.x, plotter.t = sol.simulate(t_in)
-print "final state:", plotter.x[-1]
+sol = lyapunov.Solver(system, recorder=recorder)
+recorder = sol.simulate(t_in)
+print "final state:", recorder.state[-1]
 print "elapsed time =", time.clock() - start
 
 #Plot
-plotter.time_response() 
+recorder.time_response() 
 if "showx" in sys.argv:
 	print "plotting states..."
 	titles = ["stator current", "rotor current", "angular velocity", "angle"]
+	t = numpy.array(recorder.time)
+	x = numpy.array(recorder.state)
 	for i in range(4):
 		plt.figure()
-		plt.plot(plotter.t, plotter.x[:,3+i], label="plant")
+		plt.plot(t, x[:,3+i], label="plant")
 		if "observe" in sys.argv:
-			plt.plot(plotter.t, plotter.x[:,7+i], label="observer")
+			plt.plot(t, x[:,7+i], label="observer")
 		plt.legend()
 		plt.xlabel('time (s)')
 		plt.title(titles[i])
