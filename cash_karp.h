@@ -160,20 +160,35 @@ namespace lyapunov {
 		
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
-		void find_root(double step_size, double min_step_size) {
-			//implements a simply bisection rootfinder which passes
-			//the system _through_ the boundary
+		void find_root(boost::python::list events, double min_step_size) {
+			//implements a simple bisection rootfinder
+			//  Initialize Interval
+			//  Revert
+			//  Loop over events: 
+			//    call and store the result to a vector
+			//  Loop while Inverval.length() > min_step_size and signchanges.count(True) > 1
+			//    call step to midpoint of Interval
+			//    Loop over events: 
+			//      check for sign changes, store as seq of bools
+			//    If a sign changed: 
+			//    	Revert
+			//    	set interval.upper to midpoint
+			//    Else:
+			//      set interval.lower to midpoint
+			//  If event.step_through is True, step to end of Interval
+			//  return event
+			//this algorithm will loop forever if two events occur simultaneously!
+			//If two events still occur simultaneously, call both flag methods? 
+			//If the two events differ on step_through, what to do?
 			using namespace boost::python;
 			//initialize interval for bisection method
 			object time_obj = system.attr("time");
 			double result_time = extract<double>(time_obj);
-			Interval interval = {result_time-step_size, result_time};
+			Interval interval = {previous_time, result_time};
 
 			//save state after crossing
 			//should system.attr("state") be called to check every time?
 			tuple result_state = extract<tuple>(system.attr("state"));
-			object mode_obj = system.attr("mode");
-			std::string new_mode = extract<std::string>(mode_obj);
 			
 			//need to be able to step back across the boundary
 			if(!revert()) RevertError();
