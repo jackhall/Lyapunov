@@ -606,7 +606,7 @@ class EventHandler(object):
 		self.values = [f() for f in self.events] #for next step
 		
 
-#What is the best way to record events? Does [Recorder].update neet to be 
+#What is the best way to record events? Does [Recorder].update need to be 
 #passed an EventHandler object? Probably not, because the object
 #[Solver].events is bound to will not change over the course of integration,
 #where [Solver].system might (parts of the code don't fit this assumption!).

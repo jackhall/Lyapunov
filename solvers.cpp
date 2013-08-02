@@ -20,6 +20,49 @@
 
 #include <boost/python.hpp>
 //#include <boost/numeric/odeint.hpp>
+
+namespace lyapunov {
+	struct vector_to_python_tuple {
+		vector_to_python_tuple() {
+			using namespace boost::python;
+			to_python_converter<std::vector<double>, vector_to_python_tuple>();
+		}
+
+		static PyObject* convert(const std::vector<double>& x) {
+			using namespace boost::python;
+			list new_tuple; //is there a way around this list middle stage?
+			for(auto i : x) new_tuple.append(i);
+			return incref(tuple(new_tuple).ptr()); 
+		}
+	};
+
+	struct vector_from_python_tuple {
+		vector_from_python_tuple() {
+			using namespace boost::python;
+			converter::registry::push_back(&convertible, &construct, 
+										   type_id<std::vector<double>>());
+		}
+
+		static void* convertible(PyObject* obj_ptr) {
+			if (!PyTuple_Check(obj_ptr)) return 0;
+			return obj_ptr;
+		}
+
+		static void construct(PyObject* obj_ptr,
+			    boost::python::converter::rvalue_from_python_stage1_data* data) {
+			using namespace boost::python;
+			assert(PyTuple_Check(obj_ptr));
+			unsigned int length = PyTuple_Size(obj_ptr);
+			void* storage = ((converter::rvalue_from_python_storage< std::vector<double> >*)data)->storage.bytes;
+			new (storage) std::vector<double>(length);
+			for(unsigned int i=0; i<length; ++i)
+				static_cast< std::vector<double>* >(storage)->at(i) 
+					= PyFloat_AsDouble(PyTuple_GetItem(obj_ptr, i));
+			data->convertible = storage;
+		}
+	};
+}
+
 #include "cash_karp.h"
 
 BOOST_PYTHON_MODULE(solvers) {

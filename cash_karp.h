@@ -25,6 +25,7 @@
 #include <array>
 #include <type_traits>
 #include <boost/python.hpp>
+
 namespace lyapunov {
 	//Butcher Tableau for Cash-Karp Runge-Kutta method
 	template<unsigned int row>
@@ -57,47 +58,6 @@ namespace lyapunov {
 	void RootFindError() { PyErr_SetString(PyExc_RuntimeError, "Multiple roots detected."); }
 	void RevertError() { PyErr_SetString(PyExc_RuntimeError, "No state saved for necessary revert."); }
 
-	//rvalue converters for std::vector<double> and boost::python::tuple
-	struct vector_to_python_tuple {
-		vector_to_python_tuple() {
-			using namespace boost::python;
-			to_python_converter<std::vector<double>, vector_to_python_tuple>();
-		}
-
-		static PyObject* convert(const std::vector<double>& x) {
-			using namespace boost::python;
-			list new_tuple; //is there a way around this list middle stage?
-			for(auto i : x) new_tuple.append(i);
-			return incref(tuple(new_tuple).ptr()); 
-		}
-	};
-	
-	struct vector_from_python_tuple {
-		vector_from_python_tuple() {
-			using namespace boost::python;
-			converter::registry::push_back(&convertible, &construct, 
-										   type_id<std::vector<double>>());
-		}
-
-		static void* convertible(PyObject* obj_ptr) {
-			if (!PyTuple_Check(obj_ptr)) return 0;
-			return obj_ptr;
-		}
-
-		static void construct(PyObject* obj_ptr,
-			    boost::python::converter::rvalue_from_python_stage1_data* data) {
-			using namespace boost::python;
-			assert(PyTuple_Check(obj_ptr));
-			unsigned int length = PyTuple_Size(obj_ptr);
-			void* storage = ((converter::rvalue_from_python_storage< std::vector<double> >*)data)->storage.bytes;
-			new (storage) std::vector<double>(length);
-			for(unsigned int i=0; i<length; ++i)
-				static_cast< std::vector<double>* >(storage)->at(i) 
-					= PyFloat_AsDouble(PyTuple_GetItem(obj_ptr, i));
-			data->convertible = storage;
-		}
-	};
-	
 
 	struct Interval {
 		double lower, upper;
@@ -162,60 +122,43 @@ namespace lyapunov {
 		void set_system(boost::python::object new_system) { system = new_system; }
 		void find_root(boost::python::list events, double min_step_size) {
 			//implements a simple bisection rootfinder
-			//  Initialize Interval
-			//  Revert
-			//  Loop over events: 
-			//    call and store the result to a vector
-			//  Loop while Inverval.length() > min_step_size and signchanges.count(True) > 1
-			//    call step to midpoint of Interval
-			//    Loop over events: 
-			//      check for sign changes, store as seq of bools
-			//    If a sign changed: 
-			//    	Revert
-			//    	set interval.upper to midpoint
-			//    Else:
-			//      set interval.lower to midpoint
-			//  If event.step_through is True, step to end of Interval
-			//  return event
-			//this algorithm will loop forever if two events occur simultaneously!
-			//If two events still occur simultaneously, call both flag methods? 
-			//If the two events differ on step_through, what to do?
-			using namespace boost::python;
-			//initialize interval for bisection method
-			object time_obj = system.attr("time");
-			double result_time = extract<double>(time_obj);
-			Interval interval = {previous_time, result_time};
+			namespace bp = boost::python;
 
-			//save state after crossing
-			//should system.attr("state") be called to check every time?
-			tuple result_state = extract<tuple>(system.attr("state"));
-			
-			//need to be able to step back across the boundary
+			//Initialize interval
+			Interval interval = {previous_time, bp::extract<double>(system.attr("time"))};
+			//Revert (need to be able to step back across the boundary)
 			if(!revert()) RevertError();
 
-			//get mode before crossing
-			std::string old_mode = extract<std::string>(mode_obj);
-			std::string current_mode;
+			//Loop over events
+				//call and store event function values to vector
+			bp::size_t num_events = bp::len(events);
+			std::vector<double> starting_values(num_events), test_values(num_events);
+			for(bp::size_t i=0; i<num_events; ++i) 
+				starting_values[i] = bp::extract<double>(events[i]());
+
 			while(interval.length() > min_step_size) {
+				//step to midpoint of interval
 				step(interval.length() / 2.0);
-				current_mode = extract<std::string>(mode_obj);
-				if(current_mode == old_mode) 
-					interval.lower = interval.midpoint();
-				else if(current_mode == new_mode) {
-					//We're closer to the boundary than before, on the proper side.
-					interval.upper = interval.midpoint();
-					result_time = extract<double>(time_obj);
-					result_state = extract<tuple>(system.attr("state"));
-					revert();
-				} else RootFindError();
+				//check for sign changes
+				for(bp::size_t i=0; i<num_events; ++i) {
+					if(starting_values[i]*bp::extract<double>(events[i]()) < 0) {
+						revert();
+						interval.upper = interval.midpoint();
+						break;
+					}
+					if(i == num_events-1) interval.lower = interval.midpoint();
+				}
 			}
 
-			//in case the rootfind didn't end on the proper side of the boundary...
-			current_mode = extract<std::string>(mode_obj);
-			if(current_mode == old_mode) {
-				system.attr("state") = result_state;
-				time_obj = object(result_time);
+			//find out which events changed sign and return them
+			step(interval.length());
+			bp::list flagged;
+			for(bp::size_t i=0; i<num_events; ++i) {
+				if(starting_values[i]*bp::extract<double>(events[i]()) < 0) 
+					flagged.append(events[i]);
 			}
+			revert();
+			return flagged; //return interval.length()?
 		}
 		void step(double h) {
 			//h is the step size
