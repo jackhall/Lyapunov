@@ -120,8 +120,11 @@ namespace lyapunov {
 		
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
-		void find_root(boost::python::list events, double min_step_size) {
+		boost::python::list find_root(boost::python::list events, double min_step_size) {
 			//implements a simple bisection rootfinder
+			//make this an independent function, pass in system, min_step_size?
+			//should events be a property of system? should they be a set?
+			//should system be an iterator?
 			namespace bp = boost::python;
 
 			//Initialize interval
@@ -131,16 +134,16 @@ namespace lyapunov {
 
 			//Loop over events
 				//call and store event function values to vector
-			bp::size_t num_events = bp::len(events);
+			bp::ssize_t num_events = bp::len(events);
 			std::vector<double> starting_values(num_events), test_values(num_events);
-			for(bp::size_t i=0; i<num_events; ++i) 
+			for(bp::ssize_t i=0; i<num_events; ++i) 
 				starting_values[i] = bp::extract<double>(events[i]());
 
 			while(interval.length() > min_step_size) {
 				//step to midpoint of interval
 				step(interval.length() / 2.0);
 				//check for sign changes
-				for(bp::size_t i=0; i<num_events; ++i) {
+				for(bp::ssize_t i=0; i<num_events; ++i) {
 					if(starting_values[i]*bp::extract<double>(events[i]()) < 0) {
 						revert();
 						interval.upper = interval.midpoint();
@@ -153,7 +156,7 @@ namespace lyapunov {
 			//find out which events changed sign and return them
 			step(interval.length());
 			bp::list flagged;
-			for(bp::size_t i=0; i<num_events; ++i) {
+			for(bp::ssize_t i=0; i<num_events; ++i) {
 				if(starting_values[i]*bp::extract<double>(events[i]()) < 0) 
 					flagged.append(events[i]);
 			}
