@@ -74,33 +74,51 @@ namespace lyapunov {
 		}
 	};
 
-	template<typename stepper_type>
-	boost::python::list find_root(stepper_type& stepper, double min_step_size) {
+	class stepper_wrapper {
+	protected: //makes derived code much easier to read
+		boost::python::object system;
+
+	public:
+		typedef double num_type;
+		typedef std::vector<num_type> state_type;
+		stepper_wrapper() = delete;
+		stepper_wrapper(boost::python::object sys) : system(sys) {}
+		virtual void step(num_type step_size) = 0;
+		virtual bool revert() = 0;
+		boost::python::object get_system() const { return system; }
+		void set_system(boost::python::object new_system) { system = new_system; }
+	};
+
+	boost::python::list find_root(stepper_wrapper& stepper, boost::python::list events, 
+								  typename stepper_wrapper::num_type min_step_size) {
 		//implements a simple bisection rootfinder
 		//make this an independent function, pass in system, min_step_size?
 		//should events be a property of system? should they be a set?
 		//should system be an iterator?
 		namespace bp = boost::python;
+		typedef typename stepper_wrapper::num_type num_type;
+		typedef typename stepper_wrapper::state_type state_type;
 
-		//Initialize interval
-		Interval interval = {stepper.previous_time, 
-							 bp::extract<double>(stepper.system.attr("time"))};
 		//Revert (need to be able to step back across the boundary)
+		num_type limit_time = bp::extract<num_type>(stepper.get_system().attr("time"));
 		if(!stepper.revert()) RevertError();
+		//Initialize interval
+		Interval interval = {bp::extract<num_type>(stepper.get_system().attr("time")),
+							 limit_time};
 
 		//Loop over events
 			//call and store event function values to vector
-		bp::ssize_t num_events = bp::len(stepper.events);
-		std::vector<double> starting_values(num_events), test_values(num_events);
+		bp::ssize_t num_events = bp::len(events);
+		state_type starting_values(num_events), test_values(num_events);
 		for(bp::ssize_t i=0; i<num_events; ++i) 
-			starting_values[i] = bp::extract<double>(stepper.events[i]());
+			starting_values[i] = bp::extract<num_type>(events[i]());
 
 		while(interval.length() > min_step_size) {
 			//step to midpoint of interval
 			stepper.step(interval.length() / 2.0);
 			//check for sign changes
 			for(bp::ssize_t i=0; i<num_events; ++i) {
-				if(starting_values[i]*bp::extract<double>(stepper.events[i]()) < 0) {
+				if(starting_values[i]*bp::extract<num_type>(events[i]()) < 0) {
 					stepper.revert();
 					interval.upper = interval.midpoint();
 					break;
@@ -113,53 +131,17 @@ namespace lyapunov {
 		stepper.step(interval.length());
 		bp::list flagged;
 		for(bp::ssize_t i=0; i<num_events; ++i) {
-			if(starting_values[i]*bp::extract<double>(stepper.events[i]()) < 0) 
-				flagged.append(stepper.events[i]);
+			if(starting_values[i]*bp::extract<num_type>(events[i]()) < 0) 
+				flagged.append(events[i]);
 		}
 		stepper.revert();
 		return flagged; //return interval.length()?
 	}
-
-	/*template<typename stepper_type>
-	struct std_step {
-		namespace bp = boost::python;
-		typedef typename stepper_type::state_type state_type;
-		typedef typename stepper_type::value_type num_type; //should be double
-
-		struct sys_functor {
-			bp::object system;
-
-			sys_functor() = delete;
-			sys_functor(bp::object sys) : system(sys) {}
-
-			void operator()(const state_type& x, state_type& dx, const num_type t) {
-				system.attr("time") = t;
-				system.attr("state") = x;
-				dx = system();
-			}
-		};
-
-		static void step(stepper_type& self, bp::object system, num_type step_size) {
-			//get current state and time
-			state_type next_state = system.attr("state"); //will be altered in place
-			num_type time = system.attr("time");
-
-			//get the next state
-			sys_functor sys(system);
-			self.do_step(sys_functor, next_state, system.attr("time"), step_size);
-			
-			//make sure system object has completed the step
-			system.attr("time") = time + step_size;
-			system.attr("state") = next_state;
-		}
-	}; */
-
+	
 	template<typename stepper_type>
-	class explicit_stepper_wrapper {
-		typedef typename stepper_type::state_type state_type;
-		typedef typename stepper_type::value_type num_type; //should be double
-
-		boost::python::object system;
+	class explicit_stepper_wrapper : public stepper_wrapper {
+		//typedef typename stepper_type::state_type state_type;
+		//typedef typename stepper_type::value_type num_type; //should be double
 		bool revert_possible;
 		stepper_type stepper;
 		state_type saved_state, temporary; 
@@ -167,25 +149,22 @@ namespace lyapunov {
 
 	public:
 		explicit_stepper_wrapper() = delete;
-		explicit_stepper_wrapper(boost::python::object sys) : system(sys), revert_possible(false) {}
+		explicit_stepper_wrapper(boost::python::object sys) : stepper_wrapper(sys), revert_possible(false) {}
 		
-		boost::python::object get_system() const { return system; }
-		void set_system(boost::python::object new_system) { system = new_system; }
-
-		//system function can't be passed to do_step ... because it's a method?
-		void system_function(const state_type& x, state_type& dx, const num_type t) {
-			system.attr("time") = t;
-			system.attr("state") = x;
-			dx = system();
-		}
 		void step(num_type step_size) {
 			namespace bp = boost::python;
-			saved_time = bp::extract<double>(system.attr("time"));
-			temporary = bp::extract<state_type>(system.attr("state"));
-			saved_state = temporary;
+			saved_time = bp::extract<num_type>(system.attr("time"));
+			saved_state = bp::extract<state_type>(system.attr("state"));
 			revert_possible = true;
 			//can I alter system.state in place? if not, use a temporary vector?
-			stepper.do_step(system_function, temporary, saved_time, step_size);
+			auto system_function = [this](const state_type& x, state_type& dx, 
+										  const num_type t) { 
+				system.attr("time") = t;
+				system.attr("state") = x;
+				dx = bp::extract<state_type>(system());
+			};
+			stepper.do_step(system_function, saved_state, saved_time, 
+							temporary, step_size); //(sys, xin, tin, xout, h)
 			system.attr("time") = saved_time + step_size;
 			system.attr("state") = temporary;
 		}
@@ -209,11 +188,12 @@ BOOST_PYTHON_MODULE(solvers) {
 	vector_from_python_tuple tup2vec;
 	//to_python_converter<std::vector<double>, vector_to_python_tuple>();
 
-	//def("find_root", &find_root<object>);
-
-	typedef std::vector<double> state_type;
+	def("find_root", &find_root);
+	
+	typedef stepper_wrapper::num_type num_type;
+	typedef stepper_wrapper::state_type state_type;
 	typedef ode::runge_kutta4<state_type> rk4;
-	class_< explicit_stepper_wrapper<rk4> >("runge_kutta4")
+	class_< explicit_stepper_wrapper<rk4> >("runge_kutta4", init<object>())
 		.def("step", &explicit_stepper_wrapper<rk4>::step)
 		.def("revert", &explicit_stepper_wrapper<rk4>::revert)
 		.add_property("system", &explicit_stepper_wrapper<rk4>::get_system, 
