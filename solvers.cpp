@@ -33,6 +33,22 @@ namespace lyapunov {
 	void RootFindError() { PyErr_SetString(PyExc_RuntimeError, "Multiple roots detected."); }
 	void RevertError() { PyErr_SetString(PyExc_RuntimeError, "No state saved for necessary revert."); }
 	void ErrorError() { PyErr_SetString(PyExc_RuntimeError, "No error estimate exists."); }
+	void StopIteration() { PyErr_SetString(PyExc_StopIteration, "Simulation finished."); }
+
+	//pass_through so that __iter__ can return self
+	template<typename T, typename I>
+	struct std_iterator {
+		static T next(I& obj) {
+			T* result = obj.next();
+			if(!result) {
+				StopIteration();
+				boost::python::throw_error_already_set();
+			}
+			return *result;
+		}
+		
+		static I pass_through(const I& obj) { return obj; }
+	};
 
 	struct Interval {
 		double lower, upper;
@@ -247,6 +263,7 @@ namespace lyapunov {
 //macros for exposing wrapped steppers
 //assumes 'using namespace boost::python'
 //no semicolon afterwards
+//TO DO: make steppers iterable (see std_iterator above for reference)
 #define LYAPUNOV_EXPOSE_SIMPLE_STEPPER(STEPPER) { \
 class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.def("step", &explicit_stepper_wrapper< STEPPER >::step) \
