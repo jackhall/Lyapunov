@@ -19,8 +19,11 @@
 */
 
 #include <vector>
+#include <functional>
 #include <boost/python.hpp>
 #include <boost/numeric/odeint/stepper/runge_kutta4.hpp>
+#include <boost/numeric/odeint/stepper/runge_kutta_cash_karp54.hpp>
+#include <boost/numeric/odeint/stepper/runge_kutta_fehlberg78.hpp>
 
 namespace lyapunov {
 	
@@ -76,13 +79,21 @@ namespace lyapunov {
 
 	class stepper_wrapper {
 	protected: //makes derived code much easier to read
-		boost::python::object system;
-
-	public:
 		typedef double num_type;
 		typedef std::vector<num_type> state_type;
+		boost::python::object system;
+		std::function<void(const state_type&, state_type, num_type)> system_function;
+
+	public:
 		stepper_wrapper() = delete;
-		stepper_wrapper(boost::python::object sys) : system(sys) {}
+		//trouble creating system_function!
+		explicit stepper_wrapper(boost::python::object sys) 
+			: system(sys), system_function([this](const state_type& x, state_type& dx, 
+												 const num_type t) { 
+				namespace bp = boost::python;
+				system.attr("time") = t;
+				system.attr("state") = x;
+				dx = bp::extract<state_type>(system()); } ) {}
 		virtual void step(num_type step_size) = 0;
 		virtual bool revert() = 0;
 		boost::python::object get_system() const { return system; }
@@ -142,6 +153,7 @@ namespace lyapunov {
 	class explicit_stepper_wrapper : public stepper_wrapper {
 		//typedef typename stepper_type::state_type state_type;
 		//typedef typename stepper_type::value_type num_type; //should be double
+	protected:
 		bool revert_possible;
 		stepper_type stepper;
 		state_type saved_state, temporary; 
@@ -149,22 +161,25 @@ namespace lyapunov {
 
 	public:
 		explicit_stepper_wrapper() = delete;
-		explicit_stepper_wrapper(boost::python::object sys) : stepper_wrapper(sys), revert_possible(false) {}
-		
+		explicit explicit_stepper_wrapper(boost::python::object sys) 
+			: stepper_wrapper(sys), revert_possible(false) {
+			namespace bp = boost::python;
+			auto num_states = bp::len(sys.attr("state"));
+			saved_state.resize(num_states);
+			temporary.resize(num_states);
+		}
+	
 		void step(num_type step_size) {
 			namespace bp = boost::python;
 			saved_time = bp::extract<num_type>(system.attr("time"));
 			saved_state = bp::extract<state_type>(system.attr("state"));
 			revert_possible = true;
 			//can I alter system.state in place? if not, use a temporary vector?
-			auto system_function = [this](const state_type& x, state_type& dx, 
-										  const num_type t) { 
-				system.attr("time") = t;
-				system.attr("state") = x;
-				dx = bp::extract<state_type>(system());
-			};
-			stepper.do_step(system_function, saved_state, saved_time, 
-							temporary, step_size); //(sys, xin, tin, xout, h)
+			stepper.do_step(system_function, 
+							saved_state, 
+							saved_time, 
+							temporary, 
+							step_size); //(sys, xin, tin, xout, h)
 			system.attr("time") = saved_time + step_size;
 			system.attr("state") = temporary;
 		}
@@ -175,9 +190,95 @@ namespace lyapunov {
 			revert_possible = false;
 		}
 	};
+
+	template<typename stepper_type>
+	class error_stepper_wrapper : public explicit_stepper_wrapper<stepper_type> {
+		typedef explicit_stepper_wrapper<stepper_type> base_type;
+		typedef typename base_type::state_type state_type;
+		typedef typename base_type::num_type num_type;
+		state_type error;
+
+	public:
+		error_stepper_wrapper() = delete;
+		explicit error_stepper_wrapper(boost::python::object sys) 
+			: base_type(sys), error(base_type::saved_state.size()) {}
+		
+		void step(num_type step_size) {
+			namespace bp = boost::python;
+			base_type::saved_time = bp::extract<num_type>(base_type::system.attr("time"));
+			base_type::saved_state = bp::extract<state_type>(base_type::system.attr("state"));
+			base_type::revert_possible = true;
+			//can I alter system.state in place? if not, use a temporary vector?
+			//there is trouble accessing system within this lambda...
+			base_type::stepper.do_step(base_type::system_function, 
+									   base_type::saved_state, 
+									   base_type::saved_time, 
+									   base_type::temporary, 
+									   step_size, 
+									   error); //(sys, xin, tin, xout, h, e)
+			base_type::system.attr("time") = base_type::saved_time + step_size;
+			base_type::system.attr("state") = base_type::temporary;
+		}
+		boost::python::tuple get_error() const { return error; } 
+		//error may not have been set when get_error() is called... raise exception?
+	};
+
+	template<typename stepper_type>
+	class multistepper_wrapper : public explicit_stepper_wrapper<stepper_type> {
+		typedef explicit_stepper_wrapper<stepper_type> base_type;
+		typedef typename base_type::state_type state_type;
+		typedef typename base_type::num_type num_type;
+
+	public:
+		multistepper_wrapper() = delete;
+		explicit multistepper_wrapper(boost::python::object sys)
+			: base_type(sys) {}
+		
+		void reset() { 
+			base_type::stepper.reset();
+			base_type::revert_possible = false;
+		}
+	};
 }
 
-//#include "cash_karp.h"
+//macros for exposing wrapped steppers
+//assumes 'using namespace boost::python'
+//no semicolon afterwards
+#define LYAPUNOV_EXPOSE_SIMPLE_STEPPER(STEPPER) { \
+class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
+	.def("step", &explicit_stepper_wrapper< STEPPER >::step) \
+	.def("revert", &explicit_stepper_wrapper< STEPPER >::revert) \
+	.add_property("system", &explicit_stepper_wrapper< STEPPER >::get_system, &explicit_stepper_wrapper< STEPPER >::set_system); }
+
+#define LYAPUNOV_EXPOSE_ERROR_STEPPER(STEPPER) { \
+class_< error_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
+	.def("step", &error_stepper_wrapper< STEPPER >::step) \
+	.def("revert", &error_stepper_wrapper< STEPPER >::revert) \
+	.add_property("system", &error_stepper_wrapper< STEPPER >::get_system, &error_stepper_wrapper< STEPPER >::set_system) \
+	.add_property("error", &error_stepper_wrapper< STEPPER >::get_error); }
+
+#define LYAPUNOV_EXPOSE_MULTISTEPPER(STEPPER) { \
+class_< multistepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
+	.def("step", &multistepper_wrapper< STEPPER >::step) \
+	.def("revert", &multistepper_wrapper< STEPPER >::revert) \
+	.def("reset", &multistepper_wrapper< STEPPER >::reset) \
+	.add_property("system", &multistepper_wrapper< STEPPER >::get_system, &multistepper_wrapper< STEPPER >::set_system); }
+
+//macro to help with variable order solvers
+//no semicolon afterwards
+#define LYAPUNOV_EXPOSE_VARIABLE_ORDER_SOLVER(VARSTEPPER) { \
+typedef ode::VARSTEPPER<1, state_type> VARSTEPPER1; \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER1); \
+typedef ode::VARSTEPPER<2, state_type> VARSTEPPER2; \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER2); \
+typedef ode::VARSTEPPER<3, state_type> VARSTEPPER3; \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER3); \
+typedef ode::VARSTEPPER<4, state_type> VARSTEPPER4; \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER4); \
+typedef ode::VARSTEPPER<5, state_type> VARSTEPPER5; \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER5); \
+typedef ode::VARSTEPPER<6, state_type> VARSTEPPER6; \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER6); }
 
 BOOST_PYTHON_MODULE(solvers) {
 	using namespace boost::python;
@@ -192,12 +293,18 @@ BOOST_PYTHON_MODULE(solvers) {
 	
 	typedef stepper_wrapper::num_type num_type;
 	typedef stepper_wrapper::state_type state_type;
-	typedef ode::runge_kutta4<state_type> rk4;
-	class_< explicit_stepper_wrapper<rk4> >("runge_kutta4", init<object>())
-		.def("step", &explicit_stepper_wrapper<rk4>::step)
-		.def("revert", &explicit_stepper_wrapper<rk4>::revert)
-		.add_property("system", &explicit_stepper_wrapper<rk4>::get_system, 
-								&explicit_stepper_wrapper<rk4>::set_system);
+
+	typedef ode::runge_kutta4<state_type> runge_kutta4;
+	LYAPUNOV_EXPOSE_SIMPLE_STEPPER(runge_kutta4)
+
+	typedef ode::runge_kutta_cash_karp54<state_type> cash_karp;
+	LYAPUNOV_EXPOSE_ERROR_STEPPER(cash_karp)
+	typedef ode::runge_kutta_fehlberg78<state_type> fehlberg78;
+	//LYAPUNOV_EXPOSE_ERROR_STEPPER(fehlberg78)
+
+	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_SOLVER(adams_bashforth)
+	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_SOLVER(adams_moulton)
+	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_SOLVER(adams_bashforth_moulton)
 
 	/*class_<Stepper>("Stepper", init<object>())
 		.def("step", &Stepper::step)

@@ -26,21 +26,21 @@ import matplotlib.pyplot as plt
 
 sys = lyapunov.SimpleDemo()
 sys.time = 0.0
-stepper = solvers.Stepper(sys)
+stepper = solvers.runge_kutta4(sys)
 print "No Events - mass spring damper system"
 print "Step 0:"
 print "state ", sys.state, "time ", sys.time
-print "error ", stepper.error, "slope ", sys()
+print "slope ", sys()
 
 stepper.step(0.1)
 print "Step 1:"
 print "state ", sys.state, "time ", sys.time
-print "error ", stepper.error, "slope ", sys()
+print "slope ", sys()
 
 stepper.step(0.1)
 print "Step 2:"
 print "state ", sys.state, "time ", sys.time
-print "error ", stepper.error, "slope ", sys()
+print "slope ", sys()
 
 #Sliding features are on hold until I can write manifold state code.
 #sys2 = solver.SlidingDemo()

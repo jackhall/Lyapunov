@@ -589,15 +589,17 @@ class EventHandler(object):
 	EventHandler need only provide 'detect'.
 	"""
 
-	def __init__(self, events=[]):
+	def __init__(self, events=[], min_step_size=0.0001):
 		self.events = events #a list
 		self.defined = len(events) > 0
 		self.update_values()
+		self.min_step_size = min_step_size
 
-	def detect(self, rootfinder):
+	def detect(self, stepper):
 		if self.defined:
 			if True in map(lambda f, e: f()*e < 0, self.events, self.values):
-				this_event = rootfinder(self.events)
+				this_event = lyapunov.find_root(stepper, self.events, 
+												self.min_step_size)
 				self.events = this_event.flag()
 				self.defined = len(self.events) > 0
 			self.update_values()
@@ -748,7 +750,7 @@ class Solver(object):
 		self.recorder = Recorder(system) if recorder is None else recorder
 		self.event_handler = (EventHandler() if event_handler is None else 
 							  event_handler) #has detect(find_root)
-		self.stepper = solvers.Stepper(system) #needs 'step' [and 'find_root']
+		self.stepper = solvers.runge_kutta4(system) #needs 'step' [and 'find_root']
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
 		if not hasattr(system, '__call__'):
@@ -800,7 +802,7 @@ class Solver(object):
 				if True in map(math.isnan, self.system.state):
 					raise ArithmeticError("System state is NaN!")
 				#Detect an event - defined as a change in sign.
-				self.event_handler.detect(self.stepper.find_root)
+				self.event_handler.detect(self.stepper)
 		except StopIteration:
 			pass
 		except StopIntegration as e:
