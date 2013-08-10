@@ -102,6 +102,7 @@ namespace lyapunov {
 									double min_step_size);
 
 	//should step_through, next, and set_events be redefined for multistepper? probably
+	//use bp::arg for keyword arguments
 	class stepper_wrapper {
 	public:
 		typedef double num_type;
@@ -124,6 +125,18 @@ namespace lyapunov {
 				}
 			} 
 			return false;
+		}
+		void update_signs() {
+			namespace bp = boost::python;
+			if(tracking_events) {
+				auto length = bp::len(events);
+				event_function_values.resize(length);
+				bp::object event, iter = events.attr("__iter__");
+				for(auto i=0; i<length; ++i) {
+					event = iter.attr("next")(); //must not throw StopIteration early!
+					event_function_values[i] = bp::extract<num_type>( event() );
+				}
+			}
 		}
 
 	public:
@@ -152,7 +165,7 @@ namespace lyapunov {
 		void step_through() { 
 			//assumes events haven't been reset
 			namespace bp = boost::python;
-			if( !next_time_obj.is_none() ) {
+			if( tracking_events && !next_time_obj.is_none() ) {
 				//use tolerance*2 to be sure of passing through 
 				//check event functions instead?
 				int counter = 0;
@@ -168,42 +181,35 @@ namespace lyapunov {
 		}
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
-		boost::python::object get_steps() const { return steps; }
-		void set_steps(boost::python::object time) { steps = time.attr("__iter__")(); }
+		void integrate_over(boost::python::object time) {
+			steps = time.attr("__iter__")(); 
+			next_time_obj = boost::python::object();
+			if(tracking_events) update_signs();
+		}
 		boost::python::object get_events() const { return events; }
 		void set_events(boost::python::object new_events) {
 			namespace bp = boost::python;
 			events = new_events;
 			tracking_events = !events.is_none();
-			if(tracking_events) {
-				auto length = bp::len(events);
-				event_function_values.resize(length);
-				bp::object event, iter = events.attr("__iter__");
-				for(auto i=0; i<length; ++i) {
-					event = iter.attr("next")(); //must not throw StopIteration early!
-					event_function_values[i] = bp::extract<num_type>( event() );
-				}
-			} 
+			update_signs(); 
 		}
 
 		boost::python::object next() {
 			namespace bp = boost::python;
 			//get time for this next step
 			num_type next_time;
-			bp::extract<num_type> next_time_value(next_time_obj);
-			if( next_time_value.check() ) next_time = next_time_value;
-			else {
+			if( next_time_obj.is_none() ) 
 				next_time_obj = steps.attr("next")(); //may throw StopIteration
-				next_time = bp::extract<num_type>(next_time_obj);
-			} 
+			next_time = bp::extract<num_type>(next_time_obj);
 			//take the step
 			step(next_time);
 			//check for event function sign changes, if any
 			if(tracking_events) {
 				num_type value; 
 				auto length = bp::len(events);
+				bp::object event, iter = events.attr("__iter__")();
 				for(auto i=0; i<length; ++i) {
-					value = bp::extract<num_type>( events[i]() ); //shorthand
+					value = bp::extract<num_type>( iter.attr("next")()() ); 
 					if(event_function_values[i] * value < 0) {
 						//sign has changed, move system right up to the boundary
 						auto flagged = find_root(*this, events, tolerance);
@@ -239,7 +245,7 @@ namespace lyapunov {
 			saved_state.resize(num_states);
 			temporary.resize(num_states);
 		}
-	
+		
 		void step(num_type next_time) {
 			namespace bp = boost::python;
 			saved_time = bp::extract<num_type>(system.attr("time"));
@@ -374,7 +380,8 @@ class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.def("next", &explicit_stepper_wrapper< STEPPER >::next) \
 	.def("step_through", &explicit_stepper_wrapper< STEPPER >::step_through) \
 	.def_readwrite("tolerance", &explicit_stepper_wrapper< STEPPER >::tolerance) \
-	.add_property("steps", &explicit_stepper_wrapper< STEPPER >::get_steps, &explicit_stepper_wrapper< STEPPER >::set_steps) \
+	.def("integrate_over", &explicit_stepper_wrapper< STEPPER >::integrate_over) \
+	.add_property("events", &explicit_stepper_wrapper< STEPPER >::get_events, &explicit_stepper_wrapper< STEPPER >::set_events) \
 	.add_property("system", &explicit_stepper_wrapper< STEPPER >::get_system, &explicit_stepper_wrapper< STEPPER >::set_system); }
 
 #define LYAPUNOV_EXPOSE_ERROR_STEPPER(STEPPER) { \
@@ -384,8 +391,9 @@ class_< error_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.def("__iter__", pass_through) \
 	.def("next", &error_stepper_wrapper< STEPPER >::next) \
 	.def("step_through", &error_stepper_wrapper< STEPPER >::step_through) \
+	.def("integrate_over", &error_stepper_wrapper< STEPPER >::integrate_over) \
 	.def_readwrite("tolerance", &error_stepper_wrapper< STEPPER >::tolerance) \
-	.add_property("steps", &error_stepper_wrapper< STEPPER >::get_steps, &error_stepper_wrapper< STEPPER >::set_steps) \
+	.add_property("events", &error_stepper_wrapper< STEPPER >::get_events, &error_stepper_wrapper< STEPPER >::set_events) \
 	.add_property("system", &error_stepper_wrapper< STEPPER >::get_system, &error_stepper_wrapper< STEPPER >::set_system) \
 	.add_property("error", &error_stepper_wrapper< STEPPER >::get_error); }
 
@@ -397,8 +405,9 @@ class_< multistepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.def("__iter__", pass_through) \
 	.def("next", &multistepper_wrapper< STEPPER >::next) \
 	.def("step_through", &multistepper_wrapper< STEPPER >::step_through) \
+	.def("integrate_over", &multistepper_wrapper< STEPPER >::integrate_over) \
 	.def_readwrite("tolerance", &explicit_stepper_wrapper< STEPPER >::tolerance) \
-	.add_property("steps", &multistepper_wrapper< STEPPER >::get_steps, &multistepper_wrapper< STEPPER >::set_steps) \
+	.add_property("events", &multistepper_wrapper< STEPPER >::get_events, &multistepper_wrapper< STEPPER >::set_events) \
 	.add_property("system", &multistepper_wrapper< STEPPER >::get_system, &multistepper_wrapper< STEPPER >::set_system); }
 
 //macros to help with variable order solvers
