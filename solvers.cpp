@@ -30,25 +30,25 @@ namespace lyapunov {
 	
 	//needed for element-wise list adding
 	void LengthError() { PyErr_SetString(PyExc_IndexError, "List lengths don't match."); }
-	void RootFindError() { PyErr_SetString(PyExc_RuntimeError, "Multiple roots detected."); }
+	void RootFindError() { PyErr_SetString(PyExc_RuntimeError, "Error encountered while rootfinding."); }
 	void RevertError() { PyErr_SetString(PyExc_RuntimeError, "No state saved for necessary revert."); }
 	void ErrorError() { PyErr_SetString(PyExc_RuntimeError, "No error estimate exists."); }
 	void StopIteration() { PyErr_SetString(PyExc_StopIteration, "Simulation finished."); }
 
 	//pass_through so that __iter__ can return self
-	template<typename T, typename I>
-	struct std_iterator {
-		static T next(I& obj) {
-			T* result = obj.next();
-			if(!result) {
-				StopIteration();
-				boost::python::throw_error_already_set();
-			}
-			return *result;
-		}
-		
-		static I pass_through(const I& obj) { return obj; }
-	};
+	//template<typename T, typename I>
+	//struct std_iterator {
+	//	static T next(I& obj) {
+	//		T* result = obj.next();
+	//		if(!result) {
+	//			StopIteration();
+	//			boost::python::throw_error_already_set();
+	//		}
+	//		return *result;
+	//	}
+	//	
+	//	static I pass_through(const I& obj) { return obj; }
+	//};
 
 	struct Interval {
 		double lower, upper;
@@ -95,29 +95,130 @@ namespace lyapunov {
 		}
 	};
 
+	boost::python::object pass_through(const boost::python::object& obj) { return obj; }
+	class stepper_wrapper;
+	boost::python::object find_root(stepper_wrapper& stepper, 
+									boost::python::object events, 
+									double min_step_size);
+
+	//should step_through, next, and set_events be redefined for multistepper? probably
 	class stepper_wrapper {
 	public:
 		typedef double num_type;
 		typedef std::vector<num_type> state_type;
+		num_type tolerance;
 
 	protected: //makes derived code much easier to read
-		boost::python::object system;
+		boost::python::object system, steps, events, next_time_obj;
+		state_type event_function_values;
+		bool tracking_events;
 		std::function<void(const state_type&, state_type&, num_type)> system_function;
+		bool check_events() {
+			namespace bp = boost::python;
+			if(tracking_events) {
+				num_type value; 
+				auto length = bp::len(events);
+				for(auto i=0; i<length; ++i) {
+					value = bp::extract<num_type>( events[i]() ); //shorthand
+					if(event_function_values[i] * value < 0) return true;
+				}
+			} 
+			return false;
+		}
 
 	public:
 		stepper_wrapper() = delete;
-		//trouble creating system_function!
-		explicit stepper_wrapper(boost::python::object sys) 
-			: system(sys), system_function([this](const state_type& x, state_type& dx, 
+		explicit stepper_wrapper(boost::python::object sys, 
+								 boost::python::object time=boost::python::list(),
+								 boost::python::object eventlist=boost::python::object(),
+								 num_type min_step_size=0.00001) //nearest 10us
+			: system(sys), 
+			  steps( time.attr("__iter__")() ), 
+			  events(),
+			  event_function_values(),
+			  next_time_obj(), 
+			  tracking_events(false),
+			  tolerance(min_step_size), 
+			  system_function([this](const state_type& x, state_type& dx, 
 												 const num_type t) { 
 				namespace bp = boost::python;
 				system.attr("time") = t;
 				system.attr("state") = x;
-				dx = bp::extract<state_type>(system()); } ) {}
-		virtual void step(num_type step_size) = 0;
+				dx = bp::extract<state_type>(system()); } ) {
+			set_events(eventlist); //sets events, event_function_values
+		}
+		virtual void step(num_type next_time) = 0;
 		virtual bool revert() = 0;
+		void step_through() { 
+			//assumes events haven't been reset
+			namespace bp = boost::python;
+			if( !next_time_obj.is_none() ) {
+				//use tolerance*2 to be sure of passing through 
+				//check event functions instead?
+				int counter = 0;
+				do {
+					step(bp::extract<num_type>(system.attr("time")) + tolerance);
+					counter++;
+					if(counter > 10) {
+						RootFindError();
+						bp::throw_error_already_set();
+					}
+				} while( !check_events() );
+			} 
+		}
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
+		boost::python::object get_steps() const { return steps; }
+		void set_steps(boost::python::object time) { steps = time.attr("__iter__")(); }
+		boost::python::object get_events() const { return events; }
+		void set_events(boost::python::object new_events) {
+			namespace bp = boost::python;
+			events = new_events;
+			tracking_events = !events.is_none();
+			if(tracking_events) {
+				auto length = bp::len(events);
+				event_function_values.resize(length);
+				bp::object event, iter = events.attr("__iter__");
+				for(auto i=0; i<length; ++i) {
+					event = iter.attr("next")(); //must not throw StopIteration early!
+					event_function_values[i] = bp::extract<num_type>( event() );
+				}
+			} 
+		}
+
+		boost::python::object next() {
+			namespace bp = boost::python;
+			//get time for this next step
+			num_type next_time;
+			bp::extract<num_type> next_time_value(next_time_obj);
+			if( next_time_value.check() ) next_time = next_time_value;
+			else {
+				next_time_obj = steps.attr("next")(); //may throw StopIteration
+				next_time = bp::extract<num_type>(next_time_obj);
+			} 
+			//take the step
+			step(next_time);
+			//check for event function sign changes, if any
+			if(tracking_events) {
+				num_type value; 
+				auto length = bp::len(events);
+				for(auto i=0; i<length; ++i) {
+					value = bp::extract<num_type>( events[i]() ); //shorthand
+					if(event_function_values[i] * value < 0) {
+						//sign has changed, move system right up to the boundary
+						auto flagged = find_root(*this, events, tolerance);
+						//note that next_time_obj is not reset!
+						return bp::make_tuple(system.attr("time"), flagged);
+					}
+				}
+			}
+			//since no events have occurred, reset next_time_obj to NoneType
+			//this way, the next call will continue iterating through steps
+			next_time_obj = bp::object();
+			if(tracking_events) 
+				return bp::make_tuple(system.attr("time"), bp::list());
+			else return system.attr("time");
+		}
 	};
 	template<typename stepper_type>
 	class explicit_stepper_wrapper : public stepper_wrapper {
@@ -139,7 +240,7 @@ namespace lyapunov {
 			temporary.resize(num_states);
 		}
 	
-		void step(num_type step_size) {
+		void step(num_type next_time) {
 			namespace bp = boost::python;
 			saved_time = bp::extract<num_type>(system.attr("time"));
 			saved_state = bp::extract<state_type>(system.attr("state"));
@@ -149,8 +250,8 @@ namespace lyapunov {
 							saved_state, 
 							saved_time, 
 							temporary, 
-							step_size); //(sys, xin, tin, xout, h)
-			system.attr("time") = saved_time + step_size;
+							next_time - saved_time); //(sys, xin, tin, xout, h)
+			system.attr("time") = next_time;
 			system.attr("state") = temporary;
 		}
 		bool revert() {
@@ -172,7 +273,7 @@ namespace lyapunov {
 		explicit error_stepper_wrapper(boost::python::object sys) 
 			: base_type(sys), error(base_type::saved_state.size()) {}
 		
-		void step(num_type step_size) {
+		void step(num_type next_time) {
 			namespace bp = boost::python;
 			base_type::saved_time = bp::extract<num_type>(base_type::system.attr("time"));
 			base_type::saved_state = bp::extract<state_type>(base_type::system.attr("state"));
@@ -183,9 +284,9 @@ namespace lyapunov {
 									   base_type::saved_state, 
 									   base_type::saved_time, 
 									   base_type::temporary, 
-									   step_size, 
+									   next_time - base_type::saved_time, 
 									   error); //(sys, xin, tin, xout, h, e)
-			base_type::system.attr("time") = base_type::saved_time + step_size;
+			base_type::system.attr("time") = next_time;
 			base_type::system.attr("state") = base_type::temporary;
 		}
 		boost::python::object get_error() { 
@@ -210,8 +311,9 @@ namespace lyapunov {
 		}
 	};
 
-	boost::python::list find_root(stepper_wrapper& stepper, boost::python::list events, 
-								  typename stepper_wrapper::num_type min_step_size) {
+	boost::python::object find_root(stepper_wrapper& stepper, 
+									boost::python::object events, 
+								  	double min_step_size) {
 		//implements a simple bisection rootfinder
 		//make this an independent function, pass in system, min_step_size?
 		//should events be a property of system? should they be a set?
@@ -268,12 +370,22 @@ namespace lyapunov {
 class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.def("step", &explicit_stepper_wrapper< STEPPER >::step) \
 	.def("revert", &explicit_stepper_wrapper< STEPPER >::revert) \
+	.def("__iter__", pass_through) \
+	.def("next", &explicit_stepper_wrapper< STEPPER >::next) \
+	.def("step_through", &explicit_stepper_wrapper< STEPPER >::step_through) \
+	.def_readwrite("tolerance", &explicit_stepper_wrapper< STEPPER >::tolerance) \
+	.add_property("steps", &explicit_stepper_wrapper< STEPPER >::get_steps, &explicit_stepper_wrapper< STEPPER >::set_steps) \
 	.add_property("system", &explicit_stepper_wrapper< STEPPER >::get_system, &explicit_stepper_wrapper< STEPPER >::set_system); }
 
 #define LYAPUNOV_EXPOSE_ERROR_STEPPER(STEPPER) { \
 class_< error_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.def("step", &error_stepper_wrapper< STEPPER >::step) \
 	.def("revert", &error_stepper_wrapper< STEPPER >::revert) \
+	.def("__iter__", pass_through) \
+	.def("next", &error_stepper_wrapper< STEPPER >::next) \
+	.def("step_through", &error_stepper_wrapper< STEPPER >::step_through) \
+	.def_readwrite("tolerance", &error_stepper_wrapper< STEPPER >::tolerance) \
+	.add_property("steps", &error_stepper_wrapper< STEPPER >::get_steps, &error_stepper_wrapper< STEPPER >::set_steps) \
 	.add_property("system", &error_stepper_wrapper< STEPPER >::get_system, &error_stepper_wrapper< STEPPER >::set_system) \
 	.add_property("error", &error_stepper_wrapper< STEPPER >::get_error); }
 
@@ -282,6 +394,11 @@ class_< multistepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.def("step", &multistepper_wrapper< STEPPER >::step) \
 	.def("revert", &multistepper_wrapper< STEPPER >::revert) \
 	.def("reset", &multistepper_wrapper< STEPPER >::reset) \
+	.def("__iter__", pass_through) \
+	.def("next", &multistepper_wrapper< STEPPER >::next) \
+	.def("step_through", &multistepper_wrapper< STEPPER >::step_through) \
+	.def_readwrite("tolerance", &explicit_stepper_wrapper< STEPPER >::tolerance) \
+	.add_property("steps", &multistepper_wrapper< STEPPER >::get_steps, &multistepper_wrapper< STEPPER >::set_steps) \
 	.add_property("system", &multistepper_wrapper< STEPPER >::get_system, &multistepper_wrapper< STEPPER >::set_system); }
 
 //macros to help with variable order solvers
