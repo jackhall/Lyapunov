@@ -131,7 +131,7 @@ namespace lyapunov {
 			if(tracking_events) {
 				auto length = bp::len(events);
 				event_function_values.resize(length);
-				bp::object event, iter = events.attr("__iter__");
+				bp::object event, iter = events.attr("__iter__")();
 				for(auto i=0; i<length; ++i) {
 					event = iter.attr("next")(); //must not throw StopIteration early!
 					event_function_values[i] = bp::extract<num_type>( event() );
@@ -142,7 +142,7 @@ namespace lyapunov {
 	public:
 		stepper_wrapper() = delete;
 		explicit stepper_wrapper(boost::python::object sys, 
-								 boost::python::object time=boost::python::list(),
+								 boost::python::object time,
 								 boost::python::object eventlist=boost::python::object(),
 								 num_type min_step_size=0.00001) //nearest 10us
 			: system(sys), 
@@ -158,6 +158,9 @@ namespace lyapunov {
 				system.attr("time") = t;
 				system.attr("state") = x;
 				dx = bp::extract<state_type>(system()); } ) {
+			if( !PyObject_HasAttrString(system.ptr(), "time") ) {
+				system.attr("time") = 0.0
+			}
 			set_events(eventlist); //sets events, event_function_values
 		}
 		virtual void step(num_type next_time) = 0;
@@ -228,8 +231,9 @@ namespace lyapunov {
 	};
 	template<typename stepper_type>
 	class explicit_stepper_wrapper : public stepper_wrapper {
-		//typedef typename stepper_type::state_type state_type;
-		//typedef typename stepper_type::value_type num_type; //should be double
+	public:
+		typedef typename stepper_type::state_type state_type;
+		typedef typename stepper_type::value_type num_type; //should be double
 	protected:
 		bool revert_possible;
 		stepper_type stepper;
@@ -238,8 +242,13 @@ namespace lyapunov {
 
 	public:
 		explicit_stepper_wrapper() = delete;
-		explicit explicit_stepper_wrapper(boost::python::object sys) 
-			: stepper_wrapper(sys), revert_possible(false) {
+		explicit explicit_stepper_wrapper(
+				boost::python::object sys,
+				boost::python::object time,
+				boost::python::object eventlist=boost::python::list(),
+				num_type min_step_size=0.00001) 
+			: stepper_wrapper(sys, time, eventlist, min_step_size), 
+			  revert_possible(false) {
 			namespace bp = boost::python;
 			auto num_states = bp::len(sys.attr("state"));
 			saved_state.resize(num_states);
@@ -270,14 +279,20 @@ namespace lyapunov {
 	template<typename stepper_type>
 	class error_stepper_wrapper : public explicit_stepper_wrapper<stepper_type> {
 		typedef explicit_stepper_wrapper<stepper_type> base_type;
+	public:
 		typedef typename base_type::state_type state_type;
 		typedef typename base_type::num_type num_type;
+	private:
 		state_type error;
-
 	public:
 		error_stepper_wrapper() = delete;
-		explicit error_stepper_wrapper(boost::python::object sys) 
-			: base_type(sys), error(base_type::saved_state.size()) {}
+		explicit error_stepper_wrapper(
+				boost::python::object sys,
+				boost::python::object time,
+				boost::python::object eventlist=boost::python::object(),
+				num_type min_step_size=0.00001) 
+			: base_type(sys, time, eventlist, min_step_size), 
+			  error(base_type::saved_state.size()) {}
 		
 		void step(num_type next_time) {
 			namespace bp = boost::python;
@@ -303,13 +318,17 @@ namespace lyapunov {
 	template<typename stepper_type>
 	class multistepper_wrapper : public explicit_stepper_wrapper<stepper_type> {
 		typedef explicit_stepper_wrapper<stepper_type> base_type;
+	public:
 		typedef typename base_type::state_type state_type;
 		typedef typename base_type::num_type num_type;
 
-	public:
 		multistepper_wrapper() = delete;
-		explicit multistepper_wrapper(boost::python::object sys)
-			: base_type(sys) {}
+		explicit multistepper_wrapper(
+				boost::python::object sys,
+				boost::python::object time,
+				boost::python::object eventlist=boost::python::object(),
+				num_type min_step_size=0.00001)
+			: base_type(sys, time, eventlist, min_step_size) {}
 		
 		void reset() { 
 			base_type::stepper.reset();
@@ -373,7 +392,7 @@ namespace lyapunov {
 //no semicolon afterwards
 //TO DO: make steppers iterable (see std_iterator above for reference)
 #define LYAPUNOV_EXPOSE_SIMPLE_STEPPER(STEPPER) { \
-class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
+class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object, object, optional<object, double> >()) \
 	.def("step", &explicit_stepper_wrapper< STEPPER >::step) \
 	.def("revert", &explicit_stepper_wrapper< STEPPER >::revert) \
 	.def("__iter__", pass_through) \
@@ -385,7 +404,7 @@ class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.add_property("system", &explicit_stepper_wrapper< STEPPER >::get_system, &explicit_stepper_wrapper< STEPPER >::set_system); }
 
 #define LYAPUNOV_EXPOSE_ERROR_STEPPER(STEPPER) { \
-class_< error_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
+class_< error_stepper_wrapper< STEPPER > >(#STEPPER, init<object, object, optional<object, double> >()) \
 	.def("step", &error_stepper_wrapper< STEPPER >::step) \
 	.def("revert", &error_stepper_wrapper< STEPPER >::revert) \
 	.def("__iter__", pass_through) \
@@ -398,7 +417,7 @@ class_< error_stepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
 	.add_property("error", &error_stepper_wrapper< STEPPER >::get_error); }
 
 #define LYAPUNOV_EXPOSE_MULTISTEPPER(STEPPER) { \
-class_< multistepper_wrapper< STEPPER > >(#STEPPER, init<object>()) \
+class_< multistepper_wrapper< STEPPER > >(#STEPPER, init<object, object, optional<object, double> >()) \
 	.def("step", &multistepper_wrapper< STEPPER >::step) \
 	.def("revert", &multistepper_wrapper< STEPPER >::revert) \
 	.def("reset", &multistepper_wrapper< STEPPER >::reset) \

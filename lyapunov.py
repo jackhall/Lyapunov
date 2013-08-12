@@ -71,28 +71,12 @@ class SimpleDemo(object):
 	"""Mass spring damper system."""
 	def __init__(self):
 		self.state = (1.0, 1.0) 
-		self.u = None
-
-	def __len__(self):
-		return 2
+		self.u = lambda : 0.0
 
 	def __call__(self):
-		_, v = self._state
-		return (v, self.a)
+		x, v = self.state
+		return (v, -v - x + self.u())
 
-	@property
-	def state(self):
-		return self._state
-
-	@state.setter
-	def state(self, x):
-		self._state = x
-		try:
-			self.a = -x[1] - x[0] + self.u()
-		except (AttributeError, TypeError): 
-			self.a = -x[1] - x[0]
-
-	#plot functions are deprecated!
 	def plot(self):
 		plt.figure()
 		try:
@@ -106,27 +90,20 @@ class SlidingDemo(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
 		self.state = (1.0, 1.0)
+		self.u = lambda : -1
 	
-	@property
 	def mode(self):
-		x, v = self._state
-		return 'under' if v < -0.5*x else 'over'
+		"""event function"""
+		x, v = self.state
+		return v + 0.5*x
 
-	def __len__(self):
-		return 2
-
-	@property
-	def state(self):
-		return self._state
-
-	@state.setter
-	def state(self, x):
-		self._state = x
-		self.u = 1 if self.mode == 'under' else -1
+	def u_effective(self):
+		x, v = self.state
+		return v**2 / x
 
 	def __call__(self):
 		_, v = self.state
-		return (v, self.u)
+		return (v, self.u())
 
 	def plot(self):
 		plt.figure()
