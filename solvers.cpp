@@ -159,7 +159,7 @@ namespace lyapunov {
 				system.attr("state") = x;
 				dx = bp::extract<state_type>(system()); } ) {
 			if( !PyObject_HasAttrString(system.ptr(), "time") ) {
-				system.attr("time") = 0.0
+				system.attr("time") = 0.0;
 			}
 			set_events(eventlist); //sets events, event_function_values
 		}
@@ -274,6 +274,7 @@ namespace lyapunov {
 			system.attr("time") = saved_time;
 			system.attr("state") = saved_state;
 			revert_possible = false;
+			return true;
 		}
 	};
 	template<typename stepper_type>
