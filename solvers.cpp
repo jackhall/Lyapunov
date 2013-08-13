@@ -18,6 +18,7 @@
 	The author may be reached at jackhall@utexas.edu.
 */
 
+#include <iostream>
 #include <vector>
 #include <functional>
 #include <boost/python.hpp>
@@ -99,7 +100,7 @@ namespace lyapunov {
 	class stepper_wrapper;
 	boost::python::object find_root(stepper_wrapper& stepper, 
 									boost::python::object events, 
-									double min_step_size);
+									double tolerance);
 
 	//should step_through, next, and set_events be redefined for multistepper? probably
 	//use bp::arg for keyword arguments
@@ -114,14 +115,13 @@ namespace lyapunov {
 		state_type event_function_values;
 		bool tracking_events;
 		std::function<void(const state_type&, state_type&, num_type)> system_function;
-		bool check_events() {
+		bool events_occurred() const {
 			namespace bp = boost::python;
 			if(tracking_events) {
-				num_type value; 
-				auto length = bp::len(events);
-				for(auto i=0; i<length; ++i) {
-					value = bp::extract<num_type>( events[i]() ); //shorthand
-					if(event_function_values[i] * value < 0) return true;
+				bp::object event, iter = events.attr("__iter__")();
+				for(auto x : event_function_values) {
+					event = iter.attr("next")();
+					if(x * bp::extract<num_type>( event() ) < 0) return true;
 				}
 			} 
 			return false;
@@ -129,12 +129,12 @@ namespace lyapunov {
 		void update_signs() {
 			namespace bp = boost::python;
 			if(tracking_events) {
-				auto length = bp::len(events);
-				event_function_values.resize(length);
+				event_function_values.resize( bp::len(events) );
 				bp::object event, iter = events.attr("__iter__")();
-				for(auto i=0; i<length; ++i) {
-					event = iter.attr("next")(); //must not throw StopIteration early!
-					event_function_values[i] = bp::extract<num_type>( event() );
+				for(auto& x : event_function_values) {
+					//must not throw StopIteration early!
+					event = iter.attr("next")(); 
+					x = bp::extract<num_type>( event() );
 				}
 			}
 		}
@@ -171,15 +171,17 @@ namespace lyapunov {
 			if( tracking_events && !next_time_obj.is_none() ) {
 				//use tolerance*2 to be sure of passing through 
 				//check event functions instead?
-				int counter = 0;
+				int counter = 1;
+				num_type time;
 				do {
-					step(bp::extract<num_type>(system.attr("time")) + tolerance);
-					counter++;
-					if(counter > 10) {
-						RootFindError();
-						bp::throw_error_already_set();
-					}
-				} while( !check_events() );
+					time = bp::extract<num_type>(system.attr("time"));
+					step(time + tolerance);
+					++counter;
+				} while( !events_occurred() or counter < 10 );
+				if(counter >= 10) {
+					RootFindError();
+					bp::throw_error_already_set();
+				}
 			} 
 		}
 		boost::python::object get_system() const { return system; }
@@ -191,42 +193,33 @@ namespace lyapunov {
 		}
 		boost::python::object get_events() const { return events; }
 		void set_events(boost::python::object new_events) {
-			namespace bp = boost::python;
 			events = new_events;
 			tracking_events = !events.is_none();
 			update_signs(); 
 		}
-
 		boost::python::object next() {
 			namespace bp = boost::python;
 			//get time for this next step
-			num_type next_time;
 			if( next_time_obj.is_none() ) 
 				next_time_obj = steps.attr("next")(); //may throw StopIteration
-			next_time = bp::extract<num_type>(next_time_obj);
+			num_type next_time = bp::extract<num_type>(next_time_obj);
 			//take the step
 			step(next_time);
 			//check for event function sign changes, if any
-			if(tracking_events) {
-				num_type value; 
-				auto length = bp::len(events);
-				bp::object event, iter = events.attr("__iter__")();
-				for(auto i=0; i<length; ++i) {
-					value = bp::extract<num_type>( iter.attr("next")()() ); 
-					if(event_function_values[i] * value < 0) {
-						//sign has changed, move system right up to the boundary
-						auto flagged = find_root(*this, events, tolerance);
-						//note that next_time_obj is not reset!
-						return bp::make_tuple(system.attr("time"), flagged);
-					}
-				}
+			if( events_occurred() ) {
+				//std::cout << "Rootfinding...";
+				auto flagged = find_root(*this, events, tolerance);
+				//note that next_time_obj is not reset!
+				//std::cout << "Root found." << std::endl;
+				return bp::make_tuple(system.attr("time"), flagged);
+			} else {
+				//reset next_time_obj to NoneType so the next call
+				//will continue iterating through steps
+				next_time_obj = bp::object();
+				if(tracking_events) 
+					return bp::make_tuple(system.attr("time"), bp::list());
+				else return system.attr("time");
 			}
-			//since no events have occurred, reset next_time_obj to NoneType
-			//this way, the next call will continue iterating through steps
-			next_time_obj = bp::object();
-			if(tracking_events) 
-				return bp::make_tuple(system.attr("time"), bp::list());
-			else return system.attr("time");
 		}
 	};
 	template<typename stepper_type>
@@ -301,7 +294,6 @@ namespace lyapunov {
 			base_type::saved_state = bp::extract<state_type>(base_type::system.attr("state"));
 			base_type::revert_possible = true;
 			//can I alter system.state in place? if not, use a temporary vector?
-			//there is trouble accessing system within this lambda...
 			base_type::stepper.do_step(base_type::system_function, 
 									   base_type::saved_state, 
 									   base_type::saved_time, 
@@ -312,7 +304,8 @@ namespace lyapunov {
 			base_type::system.attr("state") = base_type::temporary;
 		}
 		boost::python::object get_error() { 
-			if(base_type::revert_possible) return boost::python::tuple(error); 
+			if(base_type::revert_possible) 
+				return boost::python::tuple(error); 
 			else ErrorError();
 		} 
 	};
@@ -339,7 +332,7 @@ namespace lyapunov {
 
 	boost::python::object find_root(stepper_wrapper& stepper, 
 									boost::python::object events, 
-								  	double min_step_size) {
+								  	double tolerance) {
 		//implements a simple bisection rootfinder
 		//make this an independent function, pass in system, min_step_size?
 		//should events be a property of system? should they be a set?
@@ -357,33 +350,41 @@ namespace lyapunov {
 
 		//Loop over events
 			//call and store event function values to vector
-		bp::ssize_t num_events = bp::len(events);
-		state_type starting_values(num_events), test_values(num_events);
-		for(bp::ssize_t i=0; i<num_events; ++i) 
-			starting_values[i] = bp::extract<num_type>(events[i]());
+		state_type starting_values( bp::len(events) );
+		bp::object event, iter = events.attr("__iter__")();
+		for(auto& x : starting_values) {
+			event = iter.attr("next")();
+			x = bp::extract<num_type>(event());
+		}
 
-		while(interval.length() > min_step_size) {
+		bool boundary_crossed = false;
+		while(interval.length() > tolerance) {
 			//step to midpoint of interval
-			stepper.step(interval.length() / 2.0);
+			stepper.step(interval.midpoint());
 			//check for sign changes
-			for(bp::ssize_t i=0; i<num_events; ++i) {
-				if(starting_values[i]*bp::extract<num_type>(events[i]()) < 0) {
-					stepper.revert();
-					interval.upper = interval.midpoint();
-					break;
-				}
-				if(i == num_events-1) interval.lower = interval.midpoint();
+			iter = events.attr("__iter__")();
+			for(auto x : starting_values) {
+				event = iter.attr("next")();
+				boundary_crossed = x * bp::extract<num_type>(event()) < 0;
+				if(boundary_crossed) break;
 			}
+			if(boundary_crossed) {
+				if(!stepper.revert()) RevertError(); //may not need this check
+				interval.upper = interval.midpoint();
+				boundary_crossed = false;
+			} else interval.lower = interval.midpoint();
 		}
 
 		//find out which events changed sign and return them
-		stepper.step(interval.length());
+		stepper.step(interval.upper);
 		bp::list flagged;
-		for(bp::ssize_t i=0; i<num_events; ++i) {
-			if(starting_values[i]*bp::extract<num_type>(events[i]()) < 0) 
-				flagged.append(events[i]);
+		iter = events.attr("__iter__")();
+		for(auto x : starting_values) {
+			event = iter.attr("next")();
+			if(x * bp::extract<num_type>(event()) < 0) 
+				flagged.append(event);
 		}
-		stepper.revert();
+		if(!stepper.revert()) RevertError(); //may not need this check
 		return flagged; //return interval.length()?
 	}
 }

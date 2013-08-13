@@ -90,12 +90,16 @@ class SlidingDemo(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
 		self.state = (1.0, 1.0)
-		self.u = lambda : -1
-	
-	def mode(self):
+		self.u = lambda: (1 if self.s() < 0 else -1)
+
+	def s(self):
 		"""event function"""
 		x, v = self.state
 		return v + 0.5*x
+	
+	def u_margin(self):
+		"""event function: negative when control limits exceeded"""
+		return 1.0 - abs(self.u_effective())
 
 	def u_effective(self):
 		x, v = self.state

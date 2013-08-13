@@ -4,7 +4,7 @@ LFLAGS = -shared -Wl,-no-undefined -g
 PFLAGS = -lpython2.7 -lboost_python -lboost_system
 PYTHON_LIB_PATH = /usr/lib64/python2.7/site-packages
 
-solvers.so : solvers.cpp cash_karp.h
+solvers.so : solvers.cpp 
 	$(CC) $(CFLAGS) $(PATHS) -fPIC -I/usr/include/python2.7 -o solvers.o -c solvers.cpp
 	$(CC) $(LFLAGS) $(PFLAGS) -o solvers.so solvers.o
 	rm *.o
