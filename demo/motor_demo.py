@@ -259,8 +259,7 @@ print "initial state:", system.state
 #print "next state:", sys.state
 print "simulating for", t_in.span, "sec with", t_in.points, "points."
 start = time.clock()
-sol = lyapunov.Solver(system, recorder=recorder)
-recorder = sol.simulate(t_in)
+recorder = lyapunov.simulate(system, t_in, logger=recorder)
 print "final state:", recorder.state[-1]
 print "elapsed time =", time.clock() - start
 

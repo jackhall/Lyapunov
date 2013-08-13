@@ -134,14 +134,15 @@ class PID(object):
 		self.state = (0.0,) #integral term
 
 	def __call__(self):
-		#catch Nonetype exceptions for y and r!
-		x, v = self.y() #assumes second-order, y returns output derivative
+		x, _ = self.y() 
 		error = self.r() - x
-		self._force = self.Kp*error + self.Ki*self.state[0] - self.Kd*v
 		return (error,)
 
 	def u(self):
-		return self._force
+		#catch Nonetype exceptions for y and r!
+		x, v = self.y() #assumes second-order, y returns output derivative
+		error = self.r() - x
+		return self.Kp*error + self.Ki*self.state[0] - self.Kd*v
 
 ################
 
@@ -173,7 +174,7 @@ class CompositeSystem(object):
 		self._dof = map(self._count_states, sys_list)
 		self._have_state = [n>0 for n in self._dof]
 		self._have_time = map(self._has_time, sys_list)
-		self._are_callable = [hasattr(sys, "__call__") for sys in sys_list]
+		self._are_callable = map(callable, sys_list)
 		self._num_states = sum(len(sys.state) for sys in 
 							compress(sys_list, self._have_state))
 		if sum(self._have_time):
@@ -296,25 +297,22 @@ class SubsystemDemo(object):
 
 	@property
 	def state(self):
-		return self.plant.state + self.control.state
+		return self.control.state + self.plant.state
 
 	@state.setter
 	def state(self, x):
-		self.plant.state = x[:-1]
-		self.control.state = (x[-1],)
+		self.control.state = (x[1],)
+		self.plant.state = x[1:]
 
 	def __call__(self):
-		return self.plant() + self.control()
+		return self.control() + self.plant()
 
 	def reference(self):
 		return 0.0 if self.time < 2.0 else 1.0
 
-	def __len__(self):
-		return 3
-
 	def plot(self):
 		self.plant.t_out = self.t_out
-		self.plant.x_out = self.x_out
+		self.plant.x_out = self.x_out[:,1:]
 		self.plant.plot()
 		
 
@@ -630,7 +628,7 @@ class Recorder(object):
 		self.time = []
 		self.state = []
 
-	def record(self):
+	def log(self):
 		"""
 		Call with no arguments to record system variables at the 
 		current state and time. Usually only used by 'Solver.simulate'.
@@ -681,6 +679,50 @@ class Recorder(object):
 		plt.show()
 
 
+def simulate(system, time, **kwargs):
+	#parse arguments and initialize
+	if 'solver' in kwargs:
+		stepper_class = kwargs['solver']
+	else:
+		stepper_class = solvers.runge_kutta4
+	events_defined = 'events' in kwargs
+	if events_defined:
+		if 'tolerance' in kwargs:
+			stepper = stepper_class(system, time, kwargs['events'], 
+									kwargs['tolerance'])
+		else:
+			stepper = stepper_class(system, time, kwargs['events'])
+		if 'event_handler' in kwargs:
+	 		event_handler = kwargs['event_handler']
+		else:
+			event_handler = lambda events : events
+	else:
+		stepper = stepper_class(system, time)
+	if 'logger' in kwargs:
+		logger = kwargs['logger']
+	else:
+		logger = Recorder(system)
+
+	#simulate
+	original_time, original_state = system.time, system.state
+	if events_defined:
+		for t, events in stepper:
+			#Check to make sure system states have not become invalid.
+			if any( map(math.isnan, system.state) ):
+				raise ArithmeticError("System state is NaN!")
+			logger.log()
+			if len(events) > 0:
+				stepper.events = event_handler(events)
+	else:
+		for t in stepper:
+			#Check to make sure system states have not become invalid.
+			if any( map(math.isnan, system.state) ):
+				raise ArithmeticError("System state is NaN!")
+			logger.log()
+	system.time, system.state = original_time, original_state
+	return logger
+
+
 class Solver(object):
 	"""
 	An ODE solver object for numerically integrating system objects.
@@ -729,12 +771,14 @@ class Solver(object):
 		#need a better way to integrate events and recording
 		self.system = system #has state and __call__() [time optional]
 		self.recorder = Recorder(system) if recorder is None else recorder
-		self.event_handler = (EventHandler() if event_handler is None else 
-							  event_handler) #has detect(find_root)
+		if event_handler is None:
+			self.event_handler = lambda x: x
+		else:
+			self.event_handler = event_handler
 		self.stepper = solvers.runge_kutta4(system) #needs 'step' [and 'find_root']
 		#Check basic requirements of a system object...
 		system.state #to raise an exception if state is not an attribute
-		if not hasattr(system, '__call__'):
+		if not callable(system):
 			raise AttributeError("Need to compute state derivatives")
 
 	def simulate(self, time, initial_state=None):
