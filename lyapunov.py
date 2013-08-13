@@ -6,16 +6,20 @@ Instead of treating systems as functions, lyapunov represents systems as
 objects. Not only does this significantly clean up the solver interface, but 
 it also encourages the encapsulation of subsystems. Exposed classes:
 
-Solver - An object-oriented ODE solver.
-Plotter - A way to track and later plot any system data. 
+Recorder - A way to track and later plot any system data. 
 CompositeSystem - A container/manager for subsystems, itself a system.
 Filter - A linear filter of arbitrary order. 
+Time - A convenient way of creating and manipulating time iterables.
 StepSignal - Generates a step signal.
 SquareWave - Generates a square wave.
 SineWave - Generates an sinusoid.
 ChirpSignal - Generates a sinusoid with an arbitrary instantaneous frequency.
 
---For a full description of Lyapunov's system concept, see lyapunov.Solver. 
+Exposed functions:
+
+simulate - a way to numerically integrate systems
+
+--For a full description of Lyapunov's system concept, see lyapunov.simulate. 
 
 --lyapunov.CompositeSystem provides a subsystem manager that itself 
   implements the system interface, allowing the user to build arbitrarily 
@@ -27,17 +31,18 @@ ChirpSignal - Generates a sinusoid with an arbitrary instantaneous frequency.
 --The file 'demo/motor_demo.py' has a full demonstration of the above 
   features. 
 
---Event detection and constraint management are in the works.
+--Event detection is included. See lyapunov.simulate for more information.
 
 --Code generation from symbolic input (from sympy) may happen at some point.
 
-Integration of ordinary equations is done with a custom solver implemented
-in C++ using boost.python. See the makefile in the main directory for tips
-on compiling. A C++11 capable compiler will be needed, along with a recent
-copy of boost. Compilation and linking will result in a file called 
-'solvers.so' (or whatever suffix shared libraries have on your system). 
-Either place this file in the main directory with 'lyapunov.py', or put both
-in whatever system directory python looks in to import external modules.
+Integration of ordinary equations is done with solvers from 
+boost::numeric::odeint, wrapped using boost.python. See the makefile in the 
+main directory for tips on compiling. A C++11 capable compiler will be needed, 
+along with a recent copy of boost (1.53 or later). Compilation and linking 
+will result in a file called 'solvers.so' (or whatever suffix shared 
+libraries have on your system). Either place this file in the main directory 
+with 'lyapunov.py', or put both in whatever system directory python looks in 
+to import external modules.
 """
 
 #Lyapunov: a library for integrating nonlinear dynamical systems
@@ -60,7 +65,6 @@ in whatever system directory python looks in to import external modules.
 
 import sys
 import math
-import pdb
 from itertools import chain, compress, imap
 import operator
 import numpy
@@ -464,12 +468,6 @@ class StopIntegration(Exception):
 		return repr(self.name)
 
 
-#require __call__() for event function
-#require flag() method to return new event (or None) or raise StopIntegration
-#associate events with a given system? no need with chaining
-#Remember to flag an event as active just before stepping through the boundary!
-#Make sure to catch the error properly in order to return state history!
-
 class Time(object):
 	"""
 	An iterable that acts like a time list.
@@ -489,7 +487,6 @@ class Time(object):
 	'construct' method is called (it's called automatically when the object
 	is used as an iterable). See 'construct' docstring for more information.
 	"""
-
 	def __init__(self, **kwargs):
 		"""
 		Accepts any of the following keyword arguments:
@@ -555,44 +552,6 @@ class Time(object):
 			yield t
 
 
-class EventHandler(object):
-	"""
-	EventHandler encapsulates all event detection behavior. 'detect' is called
-	at each time step, and when it returns the stepper and system should be 
-	ready to continue.
-
-	The event concept requires the object to be callable for a floating point
-	number, have a flag method with no arguments that returns a new list of
-	events, and have a boolean called step_through that specifies whether to
-	call flag before stepping through an event boundary or after. Another
-	EventHandler need only provide 'detect'.
-	"""
-
-	def __init__(self, events=[], min_step_size=0.0001):
-		self.events = events #a list
-		self.defined = len(events) > 0
-		self.update_values()
-		self.min_step_size = min_step_size
-
-	def detect(self, stepper):
-		if self.defined:
-			if True in map(lambda f, e: f()*e < 0, self.events, self.values):
-				this_event = lyapunov.find_root(stepper, self.events, 
-												self.min_step_size)
-				self.events = this_event.flag()
-				self.defined = len(self.events) > 0
-			self.update_values()
-
-	def update_values(self):
-		self.values = [f() for f in self.events] #for next step
-		
-
-#What is the best way to record events? Does [Recorder].update need to be 
-#passed an EventHandler object? Probably not, because the object
-#[Solver].events is bound to will not change over the course of integration,
-#where [Solver].system might (parts of the code don't fit this assumption!).
-#Should the recorder concept include an events interface? 
-
 class Recorder(object):
 	"""
 	Records system data during a Solver simulation through callbacks.
@@ -612,9 +571,6 @@ class Recorder(object):
 	Calling 'clear' will preserve labels and callbacks, but delete all saved
 	variable data.
 	"""
-	#Update to use object-oriented interface from matplotlib. 
-	#Use 3-tiered dict to store labels: figures, subfigures, lines?
-	#Flat is better than nested. 
 	def __init__(self, system, labels={}):
 		"""
 		Create a Plotter from a dict mapping variable labels to 
@@ -628,7 +584,7 @@ class Recorder(object):
 		self.time = []
 		self.state = []
 
-	def log(self):
+	def log(self, events=[]):
 		"""
 		Call with no arguments to record system variables at the 
 		current state and time. Usually only used by 'Solver.simulate'.
@@ -680,6 +636,53 @@ class Recorder(object):
 
 
 def simulate(system, time, **kwargs):
+	"""
+	An ODE solver function for numerically integrating system objects.
+
+	Usage:
+		record = simulate(system, time, **kwargs)
+		record = simulate(system, time[, logger][, solver]
+						  [, events[, tolerance][, event_handler]])
+
+	A time iterable should provide a float for each time step the 
+	solver needs to output (not step sizes!) Note that improperly-specified 
+	time iterables may cause the solver to diverge from the solution if 
+	combined with a fixed-step solver.
+
+	After solving, the system will be reset to its state and time
+	before 'simulate' was called.
+
+	An object implements the system concept by providing 'state' (tuple 
+	of floats) and 'time' (float) data attributes or properties. Calling 
+	a system object with no arguments must return the current state 
+	derivatives (tuple of floats). If 'time' is not specified, it will be 
+	added and initialized to zero.
+	
+	State derivatives should obviously correspond one-to-one with states. 
+	Setting 'state' and 'time' attributes should uniquely 
+	map to state derivatives. This means that calling the system should not 
+	visibly mutate the object. 
+
+	The default solver is a Runge-Kutta 4 fixed step solver.
+	In the future, variable step solving may be available as well as a wider
+	range of solvers. The solver may be specified by passing in the desired
+	solver class object with the 'solver' keyword.
+
+	Event detection can be used by passing an iterable of callable objects 
+	with the 'events' keyword. Each event in the iterable should take no
+	arguments and return a float. An event occurs when the result of one or
+	more event functions crosses zero. A rootfinder will then determine the 
+	system state and time at the event to within a certain time tolerance. 
+	This tolerance can be specified with the 'tolerance' keyword.
+
+	If the events change system state or behavior, or if the set of events
+	tracked over the course of simulation will change, you may want to specify
+	an event handler with the 'event_handler' keyword. This is a callable
+	that takes an iterable of events that have occurred and returns (as an 
+	iterable) the next set of events to be tracked. The handler is only called
+	when one or more events occur. The events it returns will replace any 
+	previous events.
+	"""
 	#parse arguments and initialize
 	if 'solver' in kwargs:
 		stepper_class = kwargs['solver']
@@ -722,133 +725,6 @@ def simulate(system, time, **kwargs):
 	system.time, system.state = original_time, original_state
 	return logger
 
-
-class Solver(object):
-	"""
-	An ODE solver object for numerically integrating system objects.
-
-	Solver integrates the system with which it is initialized. An object
-	implements the system concept by providing 'state' (tuple of floats) 
-	and 'time' (float) data attributes or properties. Calling a system 
-	object with no arguments must return the current state derivatives 
-	(tuple of floats). 
-	
-	State derivatives should obviously correspond one-to-one with states. 
-	Setting 'state' and 'time' attributes should completely and uniquely 
-	map to state derivatives. This means that calling the system should not 
-	change the object in any way visible to Lyapunov). The 'time' attribute 
-	is optional (not needed for autonomous systems), but that name is still 
-	reserved. 
-
-	Initialize Solver with a system and (optionally) a plotter object. To
-	run a simulation, call 'simulate'.
-	Information on step size and simulation length should be provided when
-	'simulate' is called or beforehand. The state and time of the system
-	when 'simulate' is called will be used as the initial state and time.
-
-	The solver is a Cash-Karp Runge-Kutta solver (order 5) with a fixed step.
-	In the future, variable step solving may be available as well as a wider
-	range of solvers. 
-
-	Event detection is not finished at the moment, but it's on the way.
-	Should events be associated with system or solver?
-	"""
-
-	def __init__(self, system, recorder=None, event_handler=None):
-		"""
-		Instantiate an ODE solver for a given system.
-
-		Usage: Solver(system, time=Time(), plotter=None)
-
-		A minimal system object is required to instantiate a Solver. 
-		AttributeErrors will be raised if the system concept is incomplete.
-
-		A plotter object (anything that provides an 'record' method that 
-		takes no arguments) is optional for simulation, but can also be 
-		provided here.
-		"""
-		#need a better way to bypass EventHandler by default
-		#need a better way to integrate events and recording
-		self.system = system #has state and __call__() [time optional]
-		self.recorder = Recorder(system) if recorder is None else recorder
-		if event_handler is None:
-			self.event_handler = lambda x: x
-		else:
-			self.event_handler = event_handler
-		self.stepper = solvers.runge_kutta4(system) #needs 'step' [and 'find_root']
-		#Check basic requirements of a system object...
-		system.state #to raise an exception if state is not an attribute
-		if not callable(system):
-			raise AttributeError("Need to compute state derivatives")
-
-	def simulate(self, time, initial_state=None):
-		"""
-		Numerically integrates the system over the given time iterable.
-
-		Such an iterable should provide a float for each time step the 
-		solver needs to output. Note that improperly-specified 'time' 
-		iterables may cause the solver to diverge from the solution if 
-		combined with a fixed-step solver.
-
-		After solving, the system will be reset to its state and time
-		before 'simulate' was called.
-		"""
-		#Initialize system
-		try:
-			self.system.time
-		except AttributeError:
-			autonomous = True
-		else:
-			autonomous = False
-			original_time = self.system.time #thus system.time is reserved!
-		#need code here that works with generators AND containers
-		time = iter(time)
-		self.system.time = time.next() 
-		next_time = time.next()
-		original_state = self.system.state
-		if initial_state is not None:
-			self.system.state = initial_state
-		#main solver loop 
-		try:
-			while True:
-				#Record state and output information
-				self.recorder.record()
-				#Step forward in time.
-				#This floating point comparison has an edge case across
-				#zero that I'm not handling. Most people will be simulating
-				#from zero in any case. Should I never step forward after
-				#an event has occurred?
-				if abs((self.system.time - next_time) 
-						/ next_time) < sys.float_info.epsilon:
-					#Event handler may have left the previous step incomplete.
-					next_time = time.next()
-				self.stepper.step(next_time - self.system.time) 
-				#Check to make sure system states have not become invalid.
-				if True in map(math.isnan, self.system.state):
-					raise ArithmeticError("System state is NaN!")
-				#Detect an event - defined as a change in sign.
-				self.event_handler.detect(self.stepper)
-		except StopIteration:
-			pass
-		except StopIntegration as e:
-			self.recorder.record()
-	  		print e
-		#Reset system to original conditions (before 'simulate' was called)
-		self.system.state = original_state
-		if autonomous:
-			del self.system.time
-		else:
-			self.system.time = original_time
-		return self.recorder
-			
-
-#class PlotterList(object):
-#	def __init__(self, plt_list):
-#		self.plotters = plt_list
-#
-#	def update(self):
-#		for plotter in self.plotters:
-#			plotter.update()
 
 
 	#def phase_portrait(self):
