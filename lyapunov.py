@@ -71,62 +71,6 @@ import numpy
 import matplotlib.pyplot as plt
 import solvers
 
-class SimpleDemo(object):
-	"""Mass spring damper system."""
-	def __init__(self):
-		self.state = (1.0, 1.0) 
-		self.u = lambda : 0.0
-
-	def __call__(self):
-		x, v = self.state
-		return (v, -v - x + self.u())
-
-	def plot(self):
-		plt.figure()
-		try:
-			plt.plot(self.x_out[:,0], self.x_out[:,1])
-			plt.show()
-		except AttributeError:
-			plt.close()
-
-
-class SlidingDemo(object):
-	"""Double integrator with linear switching mode."""
-	def __init__(self):
-		self.state = (1.0, 1.0)
-		self.u = lambda: (1 if self.s() < 0 else -1)
-
-	def s(self):
-		"""event function"""
-		x, v = self.state
-		return v + 0.5*x
-	
-	def u_margin(self):
-		"""event function: negative when control limits exceeded"""
-		return 1.0 - abs(self.u_effective())
-
-	def u_effective(self):
-		x, v = self.state
-		return v**2 / x
-
-	def __call__(self):
-		_, v = self.state
-		return (v, self.u())
-
-	def plot(self):
-		plt.figure()
-		try:
-			xmin, xmax = min(self.x_out[:,0]), max(self.x_out[:,0])
-			ymin, ymax = min(self.x_out[:,1]), max(self.x_out[:,1])
-			x = numpy.array([xmin, xmax])
-			lam = numpy.array([-0.5*xmin, -0.5*xmax])
-			plt.plot(x, lam)
-			plt.plot(self.x_out[:,0], self.x_out[:,1])
-			plt.show()
-		except AttributeError:
-			plt.close()
-
-
 #################
 # Controllers
 class PID(object):
@@ -289,36 +233,6 @@ class CompositeSystem(object):
 		self._have_time.pop(index)
 		self._are_callable.pop(index)
 
-
-class SubsystemDemo(object):
-	def __init__(self):
-		self.plant = SimpleDemo()
-		self.control = PID(Ki=1)
-		self.control.y = lambda : self.plant.state
-		self.control.r = self.reference
-		self.plant.u = self.control.u
-		self.time = 0.0
-
-	@property
-	def state(self):
-		return self.control.state + self.plant.state
-
-	@state.setter
-	def state(self, x):
-		self.control.state = (x[1],)
-		self.plant.state = x[1:]
-
-	def __call__(self):
-		return self.control() + self.plant()
-
-	def reference(self):
-		return 0.0 if self.time < 2.0 else 1.0
-
-	def plot(self):
-		self.plant.t_out = self.t_out
-		self.plant.x_out = self.x_out[:,1:]
-		self.plant.plot()
-		
 
 #################
 # Input Signals
