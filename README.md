@@ -2,6 +2,7 @@ Lyapunov
 ========
 
 A library for numerically integrating nonlinear dynamical systems. 
+See lyapunov.py for documentation for now.
 
-note to self: consider using tuples to pass around state information - they're immutable
+version 3.0.0, 8/13/2013
 

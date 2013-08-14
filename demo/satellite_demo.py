@@ -7,7 +7,7 @@ import numpy
 import matplotlib.pyplot as plt
 
 
-class SlidingDemo(object):
+class SatelliteDemo(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
 		self.state = (1.0, 1.0)
@@ -45,7 +45,7 @@ class SlidingDemo(object):
 
 
 #Brute force could work well, but with a small step size...
-sys3 = SlidingDemo()
+sys3 = SatelliteDemo()
 #sol = lyapunov.Solver(sys3)
 t_in = numpy.linspace(0.0, 3.0, 31)
 record = lyapunov.Recorder(sys3)
@@ -62,7 +62,7 @@ sys3.plot()
 
 
 #With events and sliding is more accurate, and faster than brute force.
-sys2 = SlidingDemo()
+sys2 = SatelliteDemo()
 sys2.u = lambda: -1 #replaces u_naive
 t_in = numpy.linspace(0.0, 3.0, 31)
 record = lyapunov.Recorder(sys2)

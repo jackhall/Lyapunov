@@ -7,7 +7,7 @@ import numpy
 import matplotlib.pyplot as plt
 
 
-class SimpleDemo(object):
+class MassSpringDemo(object):
 	"""
 	Mass spring damper system.
 	k = b = m = 1.0
@@ -30,7 +30,7 @@ class SimpleDemo(object):
 			plt.close()
 
 
-sys = SimpleDemo()
+sys = MassSpringDemo()
 t_in = [0.1, 0.2]
 sys.time = 0.0
 stepper = solvers.runge_kutta4(sys, t_in)
@@ -53,7 +53,7 @@ print "slope ", sys()
 class SubsystemDemo(object):
 	"""A mass-spring-damper controlled by a PID."""
 	def __init__(self):
-		self.plant = SimpleDemo()
+		self.plant = MassSpringDemo()
 		self.control = lyapunov.PID(Ki=1)
 		self.control.y = lambda : self.plant.state
 		self.control.r = self.reference
