@@ -65,9 +65,10 @@ to import external modules.
 
 import sys
 import math
-from itertools import chain, compress, imap
+from itertools import chain, compress, imap, izip, ifilter
 import operator
 import numpy
+import inspect
 import matplotlib.pyplot as plt
 import solvers
 
@@ -92,22 +93,24 @@ class PID(object):
 		error = self.r() - x
 		return self.Kp*error + self.Ki*self.state[0] - self.Kd*v
 
-################
+#################
 
-class CompositeSystem(object):
+#################
+# Nesting systems
+class ParallelSystems(object):
 	"""
 	A container/manager for subsystems, itself a system.
 
-	CompositeSystem acts as an aggregate of other objects which implement
+	ParallelSystems acts as an aggregate of other objects which implement
 	some or all of the system concept. It will ascertain whether each 
 	contained object has a 'state' attribute, a 'time' attribute, and/or
-	is callable. Objects with state must be callable. CompositeSystem will 
+	is callable. Objects with state must be callable. ParallelSystems will 
 	ignore objects with none of these interface elements. 
 	
 	The order in which subsystems are stored determines the order of 
-	evaluation and update. For instance, when CompositeSystem is called, 
+	evaluation and update. For instance, when ParallelSystems is called, 
 	it will call each of its callable subsystems in order.  When 'state' is 
-	queried or set, CompositeSystem will accordingly chain together all subsystem 
+	queried or set, ParallelSystems will accordingly chain together all subsystem 
 	state tuples or slice them.
 	"""
 	def __init__(self, sys_list):
@@ -119,24 +122,13 @@ class CompositeSystem(object):
 		Usage: CompositeSystem(sys_list)
 		"""
 		self._subsystems = list(sys_list) #use an OrderedDict?
-		self._dof = map(self._count_states, sys_list)
-		self._have_state = [n>0 for n in self._dof]
-		self._have_time = map(self._has_time, sys_list)
-		self._are_callable = map(callable, sys_list)
-		self._num_states = sum(len(sys.state) for sys in 
-							compress(sys_list, self._have_state))
-		if sum(self._have_time):
-			sys_iter = compress(sys_list, self._have_time)
-			self._time = sys_iter.next().time
-			for sys in sys_iter:
-				if sys.time != self._time:
-					print "Subsystem times aren't synchronized yet."
-					break
-		else:
-			self._time = 0
+		self._dof = [len(sys.state[0]) for sys in sys_list]
+		self._time = sys_list[0].state[1] or 0.0
+		if not self.are_synchronized():
+			print "Subsystem times aren't synchronized yet."
 		#Check to make sure that any system that has state is callable.
-		for has_state, can_call in zip(self._have_state, self._are_callable):
-			if has_state and not can_call:
+		for dof, can_call in zip(self._dof, map(callable, sys_list)):
+			if dof > 0 and not can_call:
 				raise NotImplementedError("Systems with states " 
 						+ "should be callable")
 
@@ -144,17 +136,8 @@ class CompositeSystem(object):
 		"""
 		Call each callable subsystem in turn, and concatenate the results.
 		"""
-		#generator that skips non-callable subsystems
-		call_iter = compress(self._subsystems, self._are_callable)
-		#NoneType error when call_iter is used?
-		return tuple(chain.from_iterable(
-					 imap(self._eval_systems, call_iter)))
-
-	@staticmethod
-	def _eval_systems(sys):
-		"""For calling systems."""
-		derivative = sys()
-		return derivative if derivative is not None else ()
+		call_iter = ifilter(callable, self._subsystems)
+		return tuple(chain.from_iterable((sys() for sys in call_iter)))
 
 	@property
 	def state(self):
@@ -162,50 +145,35 @@ class CompositeSystem(object):
 		Concatenate and return state information from all subsystems 
 		that have it.
 		"""
-		#generator skipping non-state subsystems
-		state_iter = compress(self._subsystems, self._have_state)
-		return tuple(chain.from_iterable(
-					 imap(lambda sys : sys.state, state_iter)))
+		return tuple(chain.from_iterable((sys.state[0] for sys in 
+										  self._subsystems)), self._time)
 
 	@state.setter
-	def state(self, x):
+	def state(self, x_t):
 		"""
 		Distributes slices of a concatenated state tuple to their
 		corresponding stated subsystems."""
+		x, self._time = x_t
 		a = 0
-		state_iter = compress(self._subsystems, self._have_state) 
-		dof_iter = compress(self._dof, self._have_state)
-		for dof, sys in zip(dof_iter, state_iter):
+		for dof, sys in izip(self._dof, self._subsystems):
 			b = a + dof 
-			sys.state = x[a:b]
+			sys.state = x[a:b], self._time
 			a = b
-		assert b == self._num_states
 
-	@property
-	def time(self):
-		return self._time
+	def are_synchronized(self, index=None):
+		if index is None:
+			return not any(imap(lambda sys: sys.state[1] != self._time, 
+								self._subsystems))
+		else:
+			return self._subsystems[index].state[1] == self._time
 
-	@time.setter
-	def time(self, t):
-		"""Updates the 'time' attribute for all subsystems that have it."""
-		self._time = t
-		for sys in compress(self._subsystems, self._have_time):
-			sys.time = t
-
-	@staticmethod
-	def _count_states(sys):
-		try:
-			return len(sys.state)
-		except AttributeError:
-			return 0	
-
-	@staticmethod
-	def _has_time(sys):
-		try:
-			sys.time
-			return True
-		except AttributeError:
-			return False
+	def synchronize(self, index=None):
+		if index is None:
+			for sys in self._subsystems:
+				sys.state = sys.state[0], self._time
+		else:
+			sys = self._subsystems[index]
+			sys.state = sys.state[0], self._time
 
 	def add_subsystem(self, index, new_system):
 		"""
@@ -215,10 +183,10 @@ class CompositeSystem(object):
 		Usage: [CompositeSystem].add_subsystem(index, new_system)
 		"""
 		self._subsystems.insert(index, new_system)
-		self._dof.insert(index, self._count_states(new_system))
-		self._have_state.insert(index, self._dof[index]>0)
-		self._have_time.insert(index, self._has_time(new_system))
-		self._are_callable.insert(index, hasattr(new_system, "__call__"))
+		self._dof.insert(index, len(new_system.state[0]))
+		if not self.are_synchronized(index):
+			print "warning - forced to synchronize new subsystem"
+			self.synchronize(index)
 
 	def remove_subsystem(self, index):
 		"""
@@ -229,10 +197,40 @@ class CompositeSystem(object):
 		"""
 		self._subsystems.pop(index)
 		self._dof.pop(index)
-		self._have_state.pop(index)
-		self._have_time.pop(index)
-		self._are_callable.pop(index)
 
+
+class SerialSystems(ParallelSystems):
+	def __iter__(self, sys_list, derivatives):
+		ParallelSystems.__init__(self, sys_list)
+		self._derivatives = derivatives #not the same as sys() in sys_list
+
+	@ParallelSystems.state.setter
+	def state(self, x_t):
+		x, self._time = x_t
+		derivatives = ()
+		a = 0
+		for dof, sys in izip(self._dof, self._subsystems):
+			b = a + dof
+			sys.state = x[a:b], self._time
+			derivatives = chain(derivatives, sys())
+			a = b
+		self._derivatives = tuple(derivatives)
+
+	def __call__(self):
+		return self._derivatives
+
+
+def systemfunctor(sys_cls):
+	argspec = inspect.getargspec(sys_cls.__call__)
+	if len(argspec.args) == len(argspec.defaults)+1:
+		#create a new function with two arguments inserted, defaulted to None
+		#it may not be possible to do this...
+		pass
+	else:
+		#check varargs?
+		raise NotImplementedError("System not callable without arguments")
+
+#################
 
 #################
 # Input Signals
