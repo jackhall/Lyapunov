@@ -29,7 +29,6 @@ import lyapunov
 
 class Motor(object):
 	def __init__(self):
-		self.time = 0.0
 		self.Rs = 10 	#stator winding resistance - ohms
 		self.Ls = 0.14 	#stator winding inductance - henrys
 		self.Rr = 10 	#rotor winding resistance - ohms
@@ -46,17 +45,12 @@ class Motor(object):
 		self.c = self.K * self.Ls / self.J
 		self.u = None
 
-	def __len__(self):
-		return 4
-
-	@property
-	def state(self):
-		return self._state
+	state = lyapunov.state_variable('_state', '_time')
 
 	@state.setter
-	def state(self, x):
-		self._state = x
-		self._output = self.h_complete(x)
+	def state(self, x_t):
+		self._state, self._time = x_t
+		self._output = self.h_complete(self._state)
 
 	def d(self):
 		""" Disturbance force at a particular time step.
@@ -93,20 +87,6 @@ class FBLController(object):
 		self.x = self.r = self.y = None
 
 	def u(self):
-		return self._control_effort
-
-	def _u_eq(self):
-		epsilon = 0.001
-		#Compute the equivalent torque that makes the system linear.
-		p = self.plant 
-		x1, x2, x3, __ = self.x()
-		r, rdot, r2dot, r3dot = self.r()
-		#if abs(x2) < epsilon?
-		den = epsilon if x2 == 0.0 else p.c*x2
-		return (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
-					+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
-
-	def __call__(self):
 		"""takes reference(+derivatives) & states, returns control effort"""
 		p = self.plant
 		r, rdot, r2dot, r3dot = self.r()
@@ -116,8 +96,19 @@ class FBLController(object):
 		k1, k2, k3 = self._gains
 		y, ydot, y2dot = self.y()
 		u_c = p.Ls * (k1*(r-y) + k2*(rdot-ydot) + k3*(r2dot-y2dot)) / den
-		self._control_effort = self._u_eq() + u_c
+		return self._u_eq() + u_c
 
+	def _u_eq(self):
+		"""Compute the equivalent torque that makes the system linear."""
+		epsilon = 0.001
+		p = self.plant 
+		x1, x2, x3, __ = self.x()
+		r, rdot, r2dot, r3dot = self.r()
+		#if abs(x2) < epsilon?
+		den = epsilon if x2 == 0.0 else p.c*x2
+		return (p.Ls * (r3dot + (p.alpha + p.beta)*p.c*x1*x2 - p.gamma*p.c*x1 
+					+ p.a*p.c*x3*x1**2 - x3*p.b**2 - p.b*p.c*x1*x2) / den)
+	
 
 class Observer(object):
 	def __init__(self, plant):
@@ -125,14 +116,12 @@ class Observer(object):
 		self.Lmax = 1000.0 #this value is arbitrary
 		self.y = self.u = None
 
-	@property
-	def state(self):
-		return self._state
+	state = lyapunov.state_variable('_state', '_time')
 
 	@state.setter
-	def state(self, xhat):
-		self._state = xhat
-		x1, x2, x3, x4 = xhat
+	def state(self, xhat_t):
+		self._state, self._time = xhat_t
+		x1, x2, x3, x4 = self._state
 		#computing observer gains...
 		epsilon = 1	#a small number to prevent division by zero
 		p = self.plant
@@ -153,10 +142,7 @@ class Observer(object):
 		L3 = L3 if abs(L3) < self.Lmax else (self.Lmax if L3>0 else -self.Lmax)
 		self._gains = L1, L2, L3, L4
 		#computing estimated output...
-		self._output = self.plant.h_complete(xhat)
-
-	def __len__(self):
-		return 4
+		self._output = self.plant.h_complete(xhat_t[0])
 
 	def output(self):
 		return self._output
@@ -176,7 +162,7 @@ class SMController(FBLController):
 		self.lmbda = lmbda
 		self.x = self.r = self.y = None
 
-	def __call__(self):
+	def u(self):
 		"""needs full reference signal, including derivatives"""
 		r, rdot, r2dot, r3dot = self.r()
 		#Compute restoring torque
@@ -184,7 +170,7 @@ class SMController(FBLController):
 		s = (r-y)*self.lmbda**2 + 2*(rdot-ydot)*self.lmbda + (r2dot - y2dot)
 		#u_d = self.eta if s > 0 else -self.eta
 		u_d = self.eta*math.tanh(10.0*s)
-		self._control_effort = self._u_eq() + u_d
+		return self._u_eq() + u_d
 
 
 #Choose input function
@@ -223,27 +209,26 @@ plant.u = controller.u
 controller.r = prefilter.output
 prefilter.signal = lambda : reference.value #value is a property
 labels = {'reference angle': lambda : reference.value,
-		  'filtered angle': lambda : prefilter.state[0],
-		  'motor angle': lambda : plant.state[3]}
-plant.state = (1.0, 1.0, 0.0, -1.0) #randomize?
-prefilter.state = (0.0,)*len(prefilter.state)
+		  'filtered angle': lambda : prefilter.state.x[0],
+		  'motor angle': lambda : plant.state.x[3]}
+plant.state = ((1.0, 1.0, 0.0, -1.0), 0.0) #randomize?
+prefilter.state = ((0.0,)*len(prefilter.state.x), 0.0)
 
 if "observe" not in sys.argv:
 	controller.y = plant.output
-	controller.x = lambda : plant.state  
-	system = lyapunov.CompositeSystem([reference, prefilter, 
-									controller, plant])
+	controller.x = lambda : plant.state.x
+	system = lyapunov.ParallelSystems([reference, prefilter, plant])
 	print "no observer"
 else:
 	observer = Observer(plant)
 	controller.y = observer.output
-	controller.x = lambda : observer.state
+	controller.x = lambda : observer.state.x
 	observer.y = plant.output
 	observer.u = controller.u
-	observer.state = (0.3,)*4 #randomize?
-	labels['observed angle'] = lambda : observer.state[3]
-	system = lyapunov.CompositeSystem([reference, prefilter, 
-									controller, plant, observer])
+	observer.state = ((0.3,)*4, 0.0) #randomize?
+	labels['observed angle'] = lambda : observer.state.x[3]
+	system = lyapunov.ParallelSystems([reference, prefilter, 
+									   plant, observer])
 	print "with observer"
 
 #Configure plotter

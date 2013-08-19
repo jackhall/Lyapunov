@@ -32,11 +32,13 @@ class MassSpringDemo(object):
 	No disturbances or control.
 	"""
 	def __init__(self):
-		self.state = (1.0, 1.0) 
+		self.state = (1.0, 1.0), 0.0
 		self.u = lambda : 0.0
 
+	state = lyapunov.state_variable("_state")
+
 	def __call__(self):
-		x, v = self.state
+		x, v = self.state.x
 		return (v, -v - x + self.u())
 
 	def plot(self):
@@ -50,21 +52,20 @@ class MassSpringDemo(object):
 
 sys = MassSpringDemo()
 t_in = [0.1, 0.2]
-sys.time = 0.0
 stepper = solvers.runge_kutta4(sys, t_in)
 print "No Events - mass spring damper system"
 print "Step 0:"
-print "state ", sys.state, "time ", sys.time
+print "state ", sys.state.x, "time ", sys.state.t
 print "slope ", sys()
 
 stepper.step(0.1)
 print "Step 1:"
-print "state ", sys.state, "time ", sys.time
+print "state ", sys.state.x, "time ", sys.state.t
 print "slope ", sys()
 
 stepper.step(0.2)
 print "Step 2:"
-print "state ", sys.state, "time ", sys.time
+print "state ", sys.state.x, "time ", sys.state.t
 print "slope ", sys()
 
 
@@ -73,19 +74,20 @@ class SubsystemDemo(object):
 	def __init__(self):
 		self.plant = MassSpringDemo()
 		self.control = lyapunov.PID(Ki=1)
-		self.control.y = lambda : self.plant.state
+		self.control.y = lambda : self.plant.state[0]
 		self.control.r = self.reference
 		self.plant.u = self.control.u
 		self.time = 0.0
 
 	@property
 	def state(self):
-		return self.control.state + self.plant.state
+		return self.control.state[0] + self.plant.state[0], self.time
 
 	@state.setter
-	def state(self, x):
-		self.control.state = (x[1],)
-		self.plant.state = x[1:]
+	def state(self, x_t):
+		self.time = x_t[1]
+		self.control.state = (x_t[0][1],), self.time
+		self.plant.state = x_t[0][1:], self.time
 
 	def __call__(self):
 		return self.control() + self.plant()

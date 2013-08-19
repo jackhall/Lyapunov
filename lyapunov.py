@@ -65,6 +65,7 @@ to import external modules.
 
 import sys
 import math
+import collections
 from itertools import chain, compress, imap, izip, ifilter
 import operator
 import numpy
@@ -73,30 +74,7 @@ import matplotlib.pyplot as plt
 import solvers
 
 #################
-# Controllers
-class PID(object):
-	""" SISO """
-	#need __len__
-	def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
-		self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
-		self.r = self.y = None
-		self.state = (0.0,) #integral term
-
-	def __call__(self):
-		x, _ = self.y() 
-		error = self.r() - x
-		return (error,)
-
-	def u(self):
-		#catch Nonetype exceptions for y and r!
-		x, v = self.y() #assumes second-order, y returns output derivative
-		error = self.r() - x
-		return self.Kp*error + self.Ki*self.state[0] - self.Kd*v
-
-#################
-
-#################
-# Nesting systems
+# System manipulation
 class ParallelSystems(object):
 	"""
 	A container/manager for subsystems, itself a system.
@@ -146,7 +124,7 @@ class ParallelSystems(object):
 		that have it.
 		"""
 		return tuple(chain.from_iterable((sys.state[0] for sys in 
-										  self._subsystems)), self._time)
+										  self._subsystems))), self._time
 
 	@state.setter
 	def state(self, x_t):
@@ -199,25 +177,24 @@ class ParallelSystems(object):
 		self._dof.pop(index)
 
 
-class SerialSystems(ParallelSystems):
-	def __iter__(self, sys_list, derivatives):
-		ParallelSystems.__init__(self, sys_list)
-		self._derivatives = derivatives #not the same as sys() in sys_list
+StateTuple = collections.namedtuple('StateTuple', 'x, t')
 
-	@ParallelSystems.state.setter
-	def state(self, x_t):
-		x, self._time = x_t
-		derivatives = ()
-		a = 0
-		for dof, sys in izip(self._dof, self._subsystems):
-			b = a + dof
-			sys.state = x[a:b], self._time
-			derivatives = chain(derivatives, sys())
-			a = b
-		self._derivatives = tuple(derivatives)
+def state_variable(xname='_lyapunov__x', tname='_lyapunov__t'):
+	""" 
+	Returns a property that acts like a StateTuple. The elements are 
+	actually stored in attributes called 'xname' and 'tname' for each
+	instance. Usage:
 
-	def __call__(self):
-		return self._derivatives
+	state(xname='_lyapunov__x', tname='_lyapunov__t') -> property attribute
+	"""
+	def fget(obj):
+		return StateTuple(obj.__dict__[xname], obj.__dict__[tname])
+	def fset(obj, x_t):
+		obj.__dict__[xname], obj.__dict__[tname] = x_t
+	def fdel(obj):
+		del obj.__dict__[xname], obj.__dict__[tname]
+	doc = "Acts like a StateTuple."
+	return property(fget, fset, fdel, doc)
 
 
 def systemfunctor(sys_cls):
@@ -229,6 +206,30 @@ def systemfunctor(sys_cls):
 	else:
 		#check varargs?
 		raise NotImplementedError("System not callable without arguments")
+
+#################
+
+#################
+# Controllers
+class PID(object):
+	""" SISO """
+	def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
+		self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
+		self.r = self.y = None
+		self.state = ((0.0,), 0.0) #integral term
+
+	state = state_variable("_state")
+
+	def __call__(self):
+		x, _ = self.y() 
+		error = self.r() - x
+		return (error,)
+
+	def u(self):
+		#catch Nonetype exceptions for y and r!
+		x, v = self.y() #assumes second-order, y returns output derivative
+		error = self.r() - x
+		return self.Kp*error + self.Ki*self.state.x[0] - self.Kd*v
 
 #################
 
@@ -249,7 +250,9 @@ class StepSignal(object):
 		"""
 		self.step_time = step_time
 		self.initial, self.final = y_initial, y_final
-		self.time = 0.0
+		self.state = (), 0.0
+	
+	state = state_variable("_lyapunov__x", "time")
 
 	@property
 	def value(self):
@@ -268,7 +271,9 @@ class SquareWave(object):
 		Usage: SquareWave(period=1.0, y_lower=-1.0, y_upper=1.0)
 		"""
 		self.period, self.lower, self.upper = period, y_lower, y_upper
-		self.time = 0.0
+		self.state = (), 0.0
+
+	state = state_variable("_lyapunov__x", "time")
 
 	@property
 	def value(self):
@@ -292,7 +297,9 @@ class SineWave(object):
 		"""
 		self.frequency, self.phase = frequency, phase
 		self.mean, self.amplitude = mean, amplitude
-		self.time = 0.0
+		self.state = (), 0.0
+
+	state = state_variable("_lyapunov__x", "time")
 	
 	@property
 	def value(self):
@@ -314,11 +321,13 @@ class ChirpSignal(object):
 		Usage: ChirpSignal(freq_fcn=None, mean=0.0, amplitude=2.0)
 		"""
 		self.amplitude, self.mean = amplitude, mean
-		self.time = 0.0
+		self.state = (), 0.0
 		if freq_fcn is None:
 			self.freq_fcn = lambda time : time
 		else:
 			self.freq_fcn = freq_fcn
+
+	state = state_variable("_lyapunov__x", "time")
 
 	@property
 	def value(self):
@@ -344,27 +353,24 @@ class Filter(object):
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
 		self._gains = gains #check signs?
-		self._state = (0.0,)*(self._num_states) #signal isn't connected yet
+		self.state = ((0.0,)*self._num_states, 0.0) #signal isn't connected yet
 		self.signal = None
 
-	@property
-	def state(self):
-		return self._state
+	state = state_variable("_state", "_time")
 
 	@state.setter
-	def state(self, x):
+	def state(self, x_t):
 		""" Set state and computes the only nontrivial derivative. """
-		self._state = x
+		self._state, self._time = x_t
 		#parenthesis for (q,d)?
 		#catch Nonetype exception?
-		self._xndot = ( sum(-q*d for (q,d) in zip(self._state, self._gains)) 
-					  + self._gains[0]*self.signal()) 
+		self._xndot = sum(-q*d for (q,d) in zip(self._state, self._gains)) 
 
 	def output(self):
-		return self._state + (self._xndot,)
+		return self._state + (self._xndot + self._gains[0]*self.signal(),)
 
 	def __call__(self):
-		return self._state[1:] + (self._xndot,)
+		return self._state[1:] + (self._xndot + self._gains[0]*self.signal(),)
 
 
 class StopIntegration(Exception):
@@ -501,8 +507,8 @@ class Recorder(object):
 		Call with no arguments to record system variables at the 
 		current state and time. Usually only used by 'Solver.simulate'.
 		"""
-		self.time.append(self.system.time)
-		self.state.append(self.system.state)
+		self.time.append(self.system.state[1])
+		self.state.append(self.system.state[0])
 		for label, f in self.labels.iteritems():
 			self.lines[label].append(f())
 
@@ -547,13 +553,13 @@ class Recorder(object):
 		plt.show()
 
 
-def simulate(system, time, **kwargs):
+def simulate(system, time_sequence, **kwargs):
 	"""
 	An ODE solver function for numerically integrating system objects.
 
 	Usage:
-		record = simulate(system, time, **kwargs)
-		record = simulate(system, time[, logger][, solver]
+		record = simulate(system, time_sequence, **kwargs)
+		record = simulate(system, time_sequence[, logger][, solver]
 						  [, events[, tolerance][, event_handler]])
 
 	A time iterable should provide a float for each time step the 
@@ -603,27 +609,27 @@ def simulate(system, time, **kwargs):
 	events_defined = 'events' in kwargs
 	if events_defined:
 		if 'tolerance' in kwargs:
-			stepper = stepper_class(system, time, kwargs['events'], 
+			stepper = stepper_class(system, time_sequence, kwargs['events'], 
 									kwargs['tolerance'])
 		else:
-			stepper = stepper_class(system, time, kwargs['events'])
+			stepper = stepper_class(system, time_sequence, kwargs['events'])
 		if 'event_handler' in kwargs:
 	 		event_handler = kwargs['event_handler']
 		else:
 			event_handler = lambda events : events
 	else:
-		stepper = stepper_class(system, time)
+		stepper = stepper_class(system, time_sequence)
 	if 'logger' in kwargs:
 		logger = kwargs['logger']
 	else:
 		logger = Recorder(system)
 
 	#simulate
-	original_time, original_state = system.time, system.state
+	original_state = system.state	
 	if events_defined:
 		for t, events in stepper:
 			#Check to make sure system states have not become invalid.
-			if any( map(math.isnan, system.state) ):
+			if any( map(math.isnan, system.state[0]) ):
 				raise ArithmeticError("System state is NaN!")
 			logger.log()
 			if len(events) > 0:
@@ -631,10 +637,10 @@ def simulate(system, time, **kwargs):
 	else:
 		for t in stepper:
 			#Check to make sure system states have not become invalid.
-			if any( map(math.isnan, system.state) ):
+			if any( map(math.isnan, system.state[0]) ):
 				raise ArithmeticError("System state is NaN!")
 			logger.log()
-	system.time, system.state = original_time, original_state
+	system.state = original_state
 	return logger
 
 

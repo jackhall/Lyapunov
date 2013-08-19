@@ -28,12 +28,14 @@ import matplotlib.pyplot as plt
 class SatelliteDemo(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
-		self.state = (1.0, 1.0)
+		self.state = (1.0, 1.0), 0.0
 		self.u = lambda: (1 if self.s() < 0 else -1)
+
+	state = lyapunov.state_variable("_state")
 
 	def s(self):
 		"""event function"""
-		x, v = self.state
+		x, v = self.state.x
 		return v + 0.5*x
 	
 	def u_margin(self):
@@ -41,11 +43,11 @@ class SatelliteDemo(object):
 		return 1.0 - abs(self.u_effective())
 
 	def u_effective(self):
-		x, v = self.state
+		x, v = self.state.x
 		return v**2 / x
 
 	def __call__(self):
-		_, v = self.state
+		_, v = self.state.x
 		return (v, self.u())
 
 	def plot(self):
