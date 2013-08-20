@@ -100,8 +100,8 @@ class ParallelSystems(object):
 		Usage: CompositeSystem(sys_list)
 		"""
 		self._subsystems = list(sys_list) #use an OrderedDict?
-		self._dof = [len(sys.state[0]) for sys in sys_list]
-		self._time = sys_list[0].state[1] or 0.0
+		self._dof = [len(sys.state[1]) for sys in sys_list]
+		self._time = sys_list[0].state[0] or 0.0
 		if not self.are_synchronized():
 			print "Subsystem times aren't synchronized yet."
 		#Check to make sure that any system that has state is callable.
@@ -123,35 +123,35 @@ class ParallelSystems(object):
 		Concatenate and return state information from all subsystems 
 		that have it.
 		"""
-		return tuple(chain.from_iterable((sys.state[0] for sys in 
-										  self._subsystems))), self._time
+		return self._time, tuple(chain.from_iterable(
+								 (sys.state[1] for sys in self._subsystems)))
 
 	@state.setter
-	def state(self, x_t):
+	def state(self, t_x):
 		"""
 		Distributes slices of a concatenated state tuple to their
 		corresponding stated subsystems."""
-		x, self._time = x_t
+		self._time, x = t_x
 		a = 0
 		for dof, sys in izip(self._dof, self._subsystems):
 			b = a + dof 
-			sys.state = x[a:b], self._time
+			sys.state = self._time, x[a:b]
 			a = b
 
 	def are_synchronized(self, index=None):
 		if index is None:
-			return not any(imap(lambda sys: sys.state[1] != self._time, 
+			return not any(imap(lambda sys: sys.state[0] != self._time, 
 								self._subsystems))
 		else:
-			return self._subsystems[index].state[1] == self._time
+			return self._subsystems[index].state[0] == self._time
 
 	def synchronize(self, index=None):
 		if index is None:
 			for sys in self._subsystems:
-				sys.state = sys.state[0], self._time
+				sys.state = self._time, sys.state[1]
 		else:
 			sys = self._subsystems[index]
-			sys.state = sys.state[0], self._time
+			sys.state = self._time, sys.state[1]
 
 	def add_subsystem(self, index, new_system):
 		"""
@@ -161,7 +161,7 @@ class ParallelSystems(object):
 		Usage: [CompositeSystem].add_subsystem(index, new_system)
 		"""
 		self._subsystems.insert(index, new_system)
-		self._dof.insert(index, len(new_system.state[0]))
+		self._dof.insert(index, len(new_system.state[1]))
 		if not self.are_synchronized(index):
 			print "warning - forced to synchronize new subsystem"
 			self.synchronize(index)
@@ -177,22 +177,22 @@ class ParallelSystems(object):
 		self._dof.pop(index)
 
 
-StateTuple = collections.namedtuple('StateTuple', 'x, t')
+State = collections.namedtuple('State', 't, x')
 
-def state_variable(xname='_lyapunov__x', tname='_lyapunov__t'):
+def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):
 	""" 
 	Returns a property that acts like a StateTuple. The elements are 
 	actually stored in attributes called 'xname' and 'tname' for each
 	instance. Usage:
 
-	state(xname='_lyapunov__x', tname='_lyapunov__t') -> property attribute
+	state(tname='_lyapunov__t', xname='_lyapunov__x') -> property attribute
 	"""
 	def fget(obj):
-		return StateTuple(obj.__dict__[xname], obj.__dict__[tname])
-	def fset(obj, x_t):
-		obj.__dict__[xname], obj.__dict__[tname] = x_t
+		return State(obj.__dict__[tname], obj.__dict__[xname])
+	def fset(obj, t_x):
+		obj.__dict__[tname], obj.__dict__[xname] = t_x
 	def fdel(obj):
-		del obj.__dict__[xname], obj.__dict__[tname]
+		del obj.__dict__[tname], obj.__dict__[xname]
 	doc = "Acts like a StateTuple."
 	return property(fget, fset, fdel, doc)
 
@@ -216,9 +216,9 @@ class PID(object):
 	def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
 		self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
 		self.r = self.y = None
-		self.state = ((0.0,), 0.0) #integral term
+		self.state = 0.0, (0.0,) #integral term
 
-	state = state_variable("_state")
+	state = state_property(xname="_state")
 
 	def __call__(self):
 		x, _ = self.y() 
@@ -250,9 +250,9 @@ class StepSignal(object):
 		"""
 		self.step_time = step_time
 		self.initial, self.final = y_initial, y_final
-		self.state = (), 0.0
+		self.state = 0.0, ()
 	
-	state = state_variable("_lyapunov__x", "time")
+	state = state_property("time", "_lyapunov__x")
 
 	@property
 	def value(self):
@@ -271,9 +271,9 @@ class SquareWave(object):
 		Usage: SquareWave(period=1.0, y_lower=-1.0, y_upper=1.0)
 		"""
 		self.period, self.lower, self.upper = period, y_lower, y_upper
-		self.state = (), 0.0
+		self.state = 0.0, ()
 
-	state = state_variable("_lyapunov__x", "time")
+	state = state_property("time", "_lyapunov__x")
 
 	@property
 	def value(self):
@@ -297,9 +297,9 @@ class SineWave(object):
 		"""
 		self.frequency, self.phase = frequency, phase
 		self.mean, self.amplitude = mean, amplitude
-		self.state = (), 0.0
+		self.state = 0.0, ()
 
-	state = state_variable("_lyapunov__x", "time")
+	state = state_property("time", "_lyapunov__x")
 	
 	@property
 	def value(self):
@@ -321,13 +321,13 @@ class ChirpSignal(object):
 		Usage: ChirpSignal(freq_fcn=None, mean=0.0, amplitude=2.0)
 		"""
 		self.amplitude, self.mean = amplitude, mean
-		self.state = (), 0.0
+		self.state = 0.0, ()
 		if freq_fcn is None:
 			self.freq_fcn = lambda time : time
 		else:
 			self.freq_fcn = freq_fcn
 
-	state = state_variable("_lyapunov__x", "time")
+	state = state_property("time", "_lyapunov__x")
 
 	@property
 	def value(self):
@@ -353,15 +353,15 @@ class Filter(object):
 		#This way, there's no need to handle complex numbers.
 		self._num_states = len(gains)
 		self._gains = gains #check signs?
-		self.state = ((0.0,)*self._num_states, 0.0) #signal isn't connected yet
+		self.state = 0.0, (0.0,)*self._num_states #signal isn't connected yet
 		self.signal = None
 
-	state = state_variable("_state", "_time")
+	state = state_property("_time", "_state")
 
 	@state.setter
-	def state(self, x_t):
+	def state(self, t_x):
 		""" Set state and computes the only nontrivial derivative. """
-		self._state, self._time = x_t
+		self._time, self._state = t_x
 		#parenthesis for (q,d)?
 		#catch Nonetype exception?
 		self._xndot = sum(-q*d for (q,d) in zip(self._state, self._gains)) 
@@ -507,8 +507,8 @@ class Recorder(object):
 		Call with no arguments to record system variables at the 
 		current state and time. Usually only used by 'Solver.simulate'.
 		"""
-		self.time.append(self.system.state[1])
-		self.state.append(self.system.state[0])
+		self.time.append(self.system.state[0])
+		self.state.append(self.system.state[1])
 		for label, f in self.labels.iteritems():
 			self.lines[label].append(f())
 
@@ -629,7 +629,7 @@ def simulate(system, time_sequence, **kwargs):
 	if events_defined:
 		for t, events in stepper:
 			#Check to make sure system states have not become invalid.
-			if any( map(math.isnan, system.state[0]) ):
+			if any( map(math.isnan, system.state[1]) ):
 				raise ArithmeticError("System state is NaN!")
 			logger.log()
 			if len(events) > 0:
@@ -637,7 +637,7 @@ def simulate(system, time_sequence, **kwargs):
 	else:
 		for t in stepper:
 			#Check to make sure system states have not become invalid.
-			if any( map(math.isnan, system.state[0]) ):
+			if any( map(math.isnan, system.state[1]) ):
 				raise ArithmeticError("System state is NaN!")
 			logger.log()
 	system.state = original_state

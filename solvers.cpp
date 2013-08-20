@@ -155,7 +155,7 @@ namespace lyapunov {
 			  system_function([this](const state_type& x, state_type& dx, 
 												 const num_type t) { 
 				namespace bp = boost::python;
-				system.attr("state") = bp::make_tuple(x, t);
+				system.attr("state") = bp::make_tuple(t, x);
 				dx = bp::extract<state_type>(system()); } ) {
 			set_events(eventlist); //sets events, event_function_values
 		}
@@ -170,7 +170,7 @@ namespace lyapunov {
 				int counter = 1;
 				num_type time;
 				do {
-					time = bp::extract<num_type>(system.attr("state")[1]);
+					time = bp::extract<num_type>(system.attr("state")[0]);
 					step(time + tolerance);
 					++counter;
 				} while( !events_occurred() or counter < 10 );
@@ -207,14 +207,14 @@ namespace lyapunov {
 				auto flagged = find_root(*this, events, tolerance);
 				//note that next_time_obj is not reset!
 				//std::cout << "Root found." << std::endl;
-				return bp::make_tuple(system.attr("state")[1], flagged);
+				return bp::make_tuple(system.attr("state")[0], flagged);
 			} else {
 				//reset next_time_obj to NoneType so the next call
 				//will continue iterating through steps
 				next_time_obj = bp::object();
 				if(tracking_events) 
-					return bp::make_tuple(system.attr("state")[1], bp::list());
-				else return system.attr("state")[1];
+					return bp::make_tuple(system.attr("state")[0], bp::list());
+				else return system.attr("state")[0];
 			}
 		}
 	};
@@ -239,7 +239,7 @@ namespace lyapunov {
 			: stepper_wrapper(sys, time, eventlist, min_step_size), 
 			  revert_possible(false) {
 			namespace bp = boost::python;
-			auto num_states = bp::len(sys.attr("state")[0]);
+			auto num_states = bp::len(sys.attr("state")[1]);
 			saved_state.resize(num_states);
 			temporary.resize(num_states);
 		}
@@ -247,8 +247,8 @@ namespace lyapunov {
 		void step(num_type next_time) {
 			namespace bp = boost::python;
 			bp::object state_tup = system.attr("state");
-			saved_time = bp::extract<num_type>(state_tup[1]);
-			saved_state = bp::extract<state_type>(state_tup[0]);
+			saved_time = bp::extract<num_type>(state_tup[0]);
+			saved_state = bp::extract<state_type>(state_tup[1]);
 			revert_possible = true;
 			//can I alter system.state in place? if not, use a temporary vector?
 			stepper.do_step(system_function, 
@@ -256,12 +256,12 @@ namespace lyapunov {
 							saved_time, 
 							temporary, 
 							next_time - saved_time); //(sys, xin, tin, xout, h)
-			system.attr("state") = bp::make_tuple(temporary, next_time);
+			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
 		bool revert() {
 			namespace bp = boost::python;
 			if(!revert_possible) return false;
-			system.attr("state") = bp::make_tuple(saved_state, saved_time);
+			system.attr("state") = bp::make_tuple(saved_time, saved_state);
 			revert_possible = false;
 			return true;
 		}
@@ -287,8 +287,8 @@ namespace lyapunov {
 		void step(num_type next_time) {
 			namespace bp = boost::python;
 			bp::object state_tup= base_type::system.attr("state");
-			base_type::saved_time = bp::extract<num_type>(state_tup[1]);
-			base_type::saved_state = bp::extract<state_type>(state_tup[0]);
+			base_type::saved_time = bp::extract<num_type>(state_tup[0]);
+			base_type::saved_state = bp::extract<state_type>(state_tup[1]);
 			base_type::revert_possible = true;
 			//can I alter system.state in place? if not, use a temporary vector?
 			base_type::stepper.do_step(base_type::system_function, 
@@ -297,7 +297,7 @@ namespace lyapunov {
 									   base_type::temporary, 
 									   next_time - base_type::saved_time, 
 									   error); //(sys, xin, tin, xout, h, e)
-			base_type::system.attr("state") = bp::make_tuple(base_type::temporary, next_time);
+			base_type::system.attr("state") = bp::make_tuple(next_time, base_type::temporary);
 		}
 		boost::python::object get_error() { 
 			if(base_type::revert_possible) 
@@ -338,10 +338,10 @@ namespace lyapunov {
 		typedef typename stepper_wrapper::state_type state_type;
 
 		//Revert (need to be able to step back across the boundary)
-		num_type limit_time = bp::extract<num_type>(stepper.get_system().attr("state")[1]);
+		num_type limit_time = bp::extract<num_type>(stepper.get_system().attr("state")[0]);
 		if(!stepper.revert()) RevertError();
 		//Initialize interval
-		Interval interval = {bp::extract<num_type>(stepper.get_system().attr("state")[1]),
+		Interval interval = {bp::extract<num_type>(stepper.get_system().attr("state")[0]),
 							 limit_time};
 
 		//Loop over events

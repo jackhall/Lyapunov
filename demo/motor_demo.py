@@ -45,11 +45,11 @@ class Motor(object):
 		self.c = self.K * self.Ls / self.J
 		self.u = None
 
-	state = lyapunov.state_variable('_state', '_time')
+	state = lyapunov.state_property("_time", "_state")
 
 	@state.setter
-	def state(self, x_t):
-		self._state, self._time = x_t
+	def state(self, t_x):
+		self._time, self._state = t_x
 		self._output = self.h_complete(self._state)
 
 	def d(self):
@@ -116,11 +116,11 @@ class Observer(object):
 		self.Lmax = 1000.0 #this value is arbitrary
 		self.y = self.u = None
 
-	state = lyapunov.state_variable('_state', '_time')
+	state = lyapunov.state_property("_time", "_state")
 
 	@state.setter
-	def state(self, xhat_t):
-		self._state, self._time = xhat_t
+	def state(self, t_xhat):
+		self._time, self._state = t_xhat
 		x1, x2, x3, x4 = self._state
 		#computing observer gains...
 		epsilon = 1	#a small number to prevent division by zero
@@ -142,7 +142,7 @@ class Observer(object):
 		L3 = L3 if abs(L3) < self.Lmax else (self.Lmax if L3>0 else -self.Lmax)
 		self._gains = L1, L2, L3, L4
 		#computing estimated output...
-		self._output = self.plant.h_complete(xhat_t[0])
+		self._output = self.plant.h_complete(t_xhat[1])
 
 	def output(self):
 		return self._output
@@ -211,8 +211,8 @@ prefilter.signal = lambda : reference.value #value is a property
 labels = {'reference angle': lambda : reference.value,
 		  'filtered angle': lambda : prefilter.state.x[0],
 		  'motor angle': lambda : plant.state.x[3]}
-plant.state = ((1.0, 1.0, 0.0, -1.0), 0.0) #randomize?
-prefilter.state = ((0.0,)*len(prefilter.state.x), 0.0)
+plant.state = 0.0, (1.0, 1.0, 0.0, -1.0) #randomize?
+prefilter.state = 0.0, (0.0,)*len(prefilter.state.x)
 
 if "observe" not in sys.argv:
 	controller.y = plant.output
@@ -225,7 +225,7 @@ else:
 	controller.x = lambda : observer.state.x
 	observer.y = plant.output
 	observer.u = controller.u
-	observer.state = ((0.3,)*4, 0.0) #randomize?
+	observer.state = 0.0, (0.3,)*4 #randomize?
 	labels['observed angle'] = lambda : observer.state.x[3]
 	system = lyapunov.ParallelSystems([reference, prefilter, 
 									   plant, observer])

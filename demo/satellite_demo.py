@@ -28,10 +28,10 @@ import matplotlib.pyplot as plt
 class SatelliteDemo(object):
 	"""Double integrator with linear switching mode."""
 	def __init__(self):
-		self.state = (1.0, 1.0), 0.0
+		self.state = 0.0, (1.0, 1.0)
 		self.u = lambda: (1 if self.s() < 0 else -1)
 
-	state = lyapunov.state_variable("_state")
+	state = lyapunov.state_property(xname="_state")
 
 	def s(self):
 		"""event function"""

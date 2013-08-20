@@ -32,10 +32,10 @@ class MassSpringDemo(object):
 	No disturbances or control.
 	"""
 	def __init__(self):
-		self.state = (1.0, 1.0), 0.0
+		self.state = 0.0, (1.0, 1.0)
 		self.u = lambda : 0.0
 
-	state = lyapunov.state_variable("_state")
+	state = lyapunov.state_property(xname="_state")
 
 	def __call__(self):
 		x, v = self.state.x
@@ -74,20 +74,20 @@ class SubsystemDemo(object):
 	def __init__(self):
 		self.plant = MassSpringDemo()
 		self.control = lyapunov.PID(Ki=1)
-		self.control.y = lambda : self.plant.state[0]
+		self.control.y = lambda : self.plant.state[1]
 		self.control.r = self.reference
 		self.plant.u = self.control.u
 		self.time = 0.0
 
 	@property
 	def state(self):
-		return self.control.state[0] + self.plant.state[0], self.time
+		return self.time, self.control.state[1] + self.plant.state[1]
 
 	@state.setter
-	def state(self, x_t):
-		self.time = x_t[1]
-		self.control.state = (x_t[0][1],), self.time
-		self.plant.state = x_t[0][1:], self.time
+	def state(self, t_x):
+		self.time = t_x[0]
+		self.control.state = self.time, (t_x[1][1],)
+		self.plant.state = self.time, t_x[1][1:]
 
 	def __call__(self):
 		return self.control() + self.plant()

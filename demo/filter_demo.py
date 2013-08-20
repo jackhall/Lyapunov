@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 fil = lyapunov.Filter((1.0, 3.0, 3.0))
 ref = lyapunov.StepSignal()
 fil.signal = lambda : ref.value
-fil.state = ((0.0,)*3, 0.0)
+fil.state = 0.0, (0.0,)*3
 sys5 = lyapunov.ParallelSystems([ref, fil])
 t_in = numpy.linspace(0.0, 10.0, 100)
 print "\nFilter"
