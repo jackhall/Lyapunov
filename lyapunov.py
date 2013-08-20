@@ -499,16 +499,16 @@ class Recorder(object):
 		self.system = system 
 		self.labels = labels 
 		self.lines = {label: [] for label in labels.keys()}
-		self.time = []
-		self.state = []
+		self.x = []
+		self.t = []
 
 	def log(self, events=[]):
 		"""
 		Call with no arguments to record system variables at the 
 		current state and time. Usually only used by 'Solver.simulate'.
 		"""
-		self.time.append(self.system.state[0])
-		self.state.append(self.system.state[1])
+		self.t.append(self.system.state[0])
+		self.x.append(self.system.state[1])
 		for label, f in self.labels.iteritems():
 			self.lines[label].append(f())
 
@@ -518,8 +518,8 @@ class Recorder(object):
 		variables. The callback functions and the labels themselves 
 		remain.
 		"""
-		self.time = []
-		self.state = []
+		self.x = []
+		self.t = []
 		for label in self.lines:
 			self.lines[label] = []
 
@@ -530,7 +530,7 @@ class Recorder(object):
 		"""
 		plt.figure()
 		for label, data in self.lines.iteritems():
-			plt.plot(self.time, numpy.array(data), label=label)
+			plt.plot(self.t, numpy.array(data), label=label)
 		plt.xlabel("time (s)")
 		plt.legend()
 		plt.show()

@@ -245,7 +245,7 @@ print "initial state:", system.state
 print "simulating for", t_in.span, "sec with", t_in.points, "points."
 start = time.clock()
 recorder = lyapunov.simulate(system, t_in, logger=recorder)
-print "final state:", recorder.state[-1]
+print "final state:", recorder.x[-1]
 print "elapsed time =", time.clock() - start
 
 #Plot
@@ -253,13 +253,12 @@ recorder.time_response()
 if "showx" in sys.argv:
 	print "plotting states..."
 	titles = ["stator current", "rotor current", "angular velocity", "angle"]
-	t = numpy.array(recorder.time)
-	x = numpy.array(recorder.state)
+	x = numpy.array(recorder.x)
 	for i in range(4):
 		plt.figure()
-		plt.plot(t, x[:,3+i], label="plant")
+		plt.plot(recorder.t, x[:,3+i], label="plant")
 		if "observe" in sys.argv:
-			plt.plot(t, x[:,7+i], label="observer")
+			plt.plot(recorder.t, x[:,7+i], label="observer")
 		plt.legend()
 		plt.xlabel('time (s)')
 		plt.title(titles[i])
