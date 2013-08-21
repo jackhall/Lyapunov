@@ -182,7 +182,7 @@ namespace lyapunov {
 		}
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
-		void integrate_over(boost::python::object time) {
+		void use_times(boost::python::object time) {
 			steps = time.attr("__iter__")(); 
 			next_time_obj = boost::python::object();
 			if(tracking_events) update_signs();
@@ -397,7 +397,7 @@ class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object, object, opt
 	.def("next", &explicit_stepper_wrapper< STEPPER >::next) \
 	.def("step_through", &explicit_stepper_wrapper< STEPPER >::step_through) \
 	.def_readwrite("tolerance", &explicit_stepper_wrapper< STEPPER >::tolerance) \
-	.def("integrate_over", &explicit_stepper_wrapper< STEPPER >::integrate_over) \
+	.def("use_times", &explicit_stepper_wrapper< STEPPER >::use_times) \
 	.add_property("events", &explicit_stepper_wrapper< STEPPER >::get_events, &explicit_stepper_wrapper< STEPPER >::set_events) \
 	.add_property("system", &explicit_stepper_wrapper< STEPPER >::get_system, &explicit_stepper_wrapper< STEPPER >::set_system); }
 
@@ -408,7 +408,7 @@ class_< error_stepper_wrapper< STEPPER > >(#STEPPER, init<object, object, option
 	.def("__iter__", pass_through) \
 	.def("next", &error_stepper_wrapper< STEPPER >::next) \
 	.def("step_through", &error_stepper_wrapper< STEPPER >::step_through) \
-	.def("integrate_over", &error_stepper_wrapper< STEPPER >::integrate_over) \
+	.def("use_times", &error_stepper_wrapper< STEPPER >::use_times) \
 	.def_readwrite("tolerance", &error_stepper_wrapper< STEPPER >::tolerance) \
 	.add_property("events", &error_stepper_wrapper< STEPPER >::get_events, &error_stepper_wrapper< STEPPER >::set_events) \
 	.add_property("system", &error_stepper_wrapper< STEPPER >::get_system, &error_stepper_wrapper< STEPPER >::set_system) \
@@ -422,7 +422,7 @@ class_< multistepper_wrapper< STEPPER > >(#STEPPER, init<object, object, optiona
 	.def("__iter__", pass_through) \
 	.def("next", &multistepper_wrapper< STEPPER >::next) \
 	.def("step_through", &multistepper_wrapper< STEPPER >::step_through) \
-	.def("integrate_over", &multistepper_wrapper< STEPPER >::integrate_over) \
+	.def("use_times", &multistepper_wrapper< STEPPER >::use_times) \
 	.def_readwrite("tolerance", &explicit_stepper_wrapper< STEPPER >::tolerance) \
 	.add_property("events", &multistepper_wrapper< STEPPER >::get_events, &multistepper_wrapper< STEPPER >::set_events) \
 	.add_property("system", &multistepper_wrapper< STEPPER >::get_system, &multistepper_wrapper< STEPPER >::set_system); }
@@ -461,10 +461,12 @@ BOOST_PYTHON_MODULE(solvers) {
 	typedef stepper_wrapper::num_type num_type;
 	typedef stepper_wrapper::state_type state_type;
 
-	typedef ode::runge_kutta4<state_type> runge_kutta4;
-	LYAPUNOV_EXPOSE_SIMPLE_STEPPER(runge_kutta4)
+	typedef ode::euler<state_type> euler;
+	LYAPUNOV_EXPOSE_SIMPLE_STEPPER(euler)
 	typedef ode::modified_midpoint<state_type> modified_midpoint;
 	LYAPUNOV_EXPOSE_SIMPLE_STEPPER(modified_midpoint)
+	typedef ode::runge_kutta4<state_type> runge_kutta4;
+	LYAPUNOV_EXPOSE_SIMPLE_STEPPER(runge_kutta4)
 
 	typedef ode::runge_kutta_cash_karp54<state_type> cash_karp;
 	LYAPUNOV_EXPOSE_ERROR_STEPPER(cash_karp)
