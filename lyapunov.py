@@ -72,6 +72,7 @@ import numpy
 import inspect
 import matplotlib.pyplot as plt
 import solvers
+from solvers import find_root
 
 #################
 # System manipulation
@@ -102,6 +103,7 @@ class ParallelSystems(object):
 		self._subsystems = list(sys_list) #use an OrderedDict?
 		self._dof = [len(sys.state[1]) for sys in sys_list]
 		self._time = sys_list[0].state[0] or 0.0
+		self.events = ParallelEvents(sys_list)
 		if not self.are_synchronized():
 			print "Subsystem times aren't synchronized yet."
 		#Check to make sure that any system that has state is callable.
@@ -115,7 +117,9 @@ class ParallelSystems(object):
 		Call each callable subsystem in turn, and concatenate the results.
 		"""
 		call_iter = ifilter(callable, self._subsystems)
-		return tuple(chain.from_iterable((sys() for sys in call_iter)))
+		return tuple(
+				 chain.from_iterable(
+				   sys() for sys in call_iter))
 
 	@property
 	def state(self):
@@ -123,8 +127,9 @@ class ParallelSystems(object):
 		Concatenate and return state information from all subsystems 
 		that have it.
 		"""
-		return self._time, tuple(chain.from_iterable(
-								 (sys.state[1] for sys in self._subsystems)))
+		return self._time, tuple(
+							 chain.from_iterable(
+							   sys.state[1] for sys in self._subsystems))
 
 	@state.setter
 	def state(self, t_x):
@@ -140,8 +145,8 @@ class ParallelSystems(object):
 
 	def are_synchronized(self, index=None):
 		if index is None:
-			return not any(imap(lambda sys: sys.state[0] != self._time, 
-								self._subsystems))
+			return not any(sys.state[0] != self._time 
+						   for sys in self._subsystems)
 		else:
 			return self._subsystems[index].state[0] == self._time
 
@@ -175,6 +180,26 @@ class ParallelSystems(object):
 		"""
 		self._subsystems.pop(index)
 		self._dof.pop(index)
+
+
+class ParallelEvents(object):
+	""" stores references to systems, not event iterables """
+	def __init__(self, sys_list):
+		def has_events(sys):
+			try:
+				sys.events
+				return True
+			except AttributeError:
+				return False
+		self._subsystems = filter(has_events, sys_list)
+
+	def __len__(self):
+		return sum(len(sys.events) for sys in self._subsystems)
+
+	def __iter__(self):
+		for system in self._subsystems:
+			for event in system.events:
+				yield event
 
 
 State = collections.namedtuple('State', 't, x')

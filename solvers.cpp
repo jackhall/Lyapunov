@@ -30,11 +30,18 @@
 namespace lyapunov {
 	
 	//needed for element-wise list adding
-	void LengthError() { PyErr_SetString(PyExc_IndexError, "List lengths don't match."); }
-	void RootFindError() { PyErr_SetString(PyExc_RuntimeError, "Error encountered while rootfinding."); }
-	void RevertError() { PyErr_SetString(PyExc_RuntimeError, "No state saved for necessary revert."); }
-	void ErrorError() { PyErr_SetString(PyExc_RuntimeError, "No error estimate exists."); }
-	void StopIteration() { PyErr_SetString(PyExc_StopIteration, "Simulation finished."); }
+	void LengthError() { 
+		PyErr_SetString(PyExc_IndexError, "List lengths don't match."); 
+		boost::python::throw_error_already_set();
+	}
+	void RuntimeError(const char* error_string) {
+		PyErr_SetString(PyExc_RuntimeError, error_string);
+		boost::python::throw_error_already_set();
+	}
+	void StopIteration() { 
+		PyErr_SetString(PyExc_StopIteration, "Simulation finished."); 
+		boost::python::throw_error_already_set();
+	}
 
 	//pass_through so that __iter__ can return self
 	//template<typename T, typename I>
@@ -97,6 +104,10 @@ namespace lyapunov {
 	};
 
 	boost::python::object pass_through(const boost::python::object& obj) { return obj; }
+	template<typename stepper_type>
+	void std_revert(stepper_type& stepper) {
+		if(!stepper.revert()) RuntimeError("No saved state to revert to.");
+	}
 	class stepper_wrapper;
 	boost::python::object find_root(stepper_wrapper& stepper, 
 									boost::python::object events, 
@@ -141,10 +152,10 @@ namespace lyapunov {
 
 	public:
 		stepper_wrapper() = delete;
-		explicit stepper_wrapper(boost::python::object sys, 
-								 boost::python::object time,
-								 boost::python::object eventlist=boost::python::object(),
-								 num_type min_step_size=0.00001) //nearest 10us
+		stepper_wrapper(boost::python::object sys, 
+					    boost::python::object time,
+						boost::python::object eventlist=boost::python::object(),
+						num_type min_step_size=0.00001) //nearest 10us
 			: system(sys), 
 			  steps( time.attr("__iter__")() ), 
 			  events(),
@@ -174,10 +185,7 @@ namespace lyapunov {
 					step(time + tolerance);
 					++counter;
 				} while( !events_occurred() or counter < 10 );
-				if(counter >= 10) {
-					RootFindError();
-					bp::throw_error_already_set();
-				}
+				if(counter >= 10) { RuntimeError("Could not find boundary."); }
 			} 
 		}
 		boost::python::object get_system() const { return system; }
@@ -231,11 +239,10 @@ namespace lyapunov {
 
 	public:
 		explicit_stepper_wrapper() = delete;
-		explicit explicit_stepper_wrapper(
-				boost::python::object sys,
-				boost::python::object time,
-				boost::python::object eventlist=boost::python::list(),
-				num_type min_step_size=0.00001) 
+		explicit_stepper_wrapper(boost::python::object sys,
+								 boost::python::object time,
+								 boost::python::object eventlist=boost::python::list(),
+								 num_type min_step_size=0.00001) 
 			: stepper_wrapper(sys, time, eventlist, min_step_size), 
 			  revert_possible(false) {
 			namespace bp = boost::python;
@@ -276,11 +283,10 @@ namespace lyapunov {
 		state_type error;
 	public:
 		error_stepper_wrapper() = delete;
-		explicit error_stepper_wrapper(
-				boost::python::object sys,
-				boost::python::object time,
-				boost::python::object eventlist=boost::python::object(),
-				num_type min_step_size=0.00001) 
+		error_stepper_wrapper(boost::python::object sys,
+							  boost::python::object time,
+							  boost::python::object eventlist=boost::python::object(),
+							  num_type min_step_size=0.00001) 
 			: base_type(sys, time, eventlist, min_step_size), 
 			  error(base_type::saved_state.size()) {}
 		
@@ -302,7 +308,7 @@ namespace lyapunov {
 		boost::python::object get_error() { 
 			if(base_type::revert_possible) 
 				return boost::python::tuple(error); 
-			else ErrorError();
+			else RuntimeError("No error estimate has been calcuated.");
 		} 
 	};
 	template<typename stepper_type>
@@ -311,15 +317,21 @@ namespace lyapunov {
 	public:
 		typedef typename base_type::state_type state_type;
 		typedef typename base_type::num_type num_type;
-
-		multistepper_wrapper() = delete;
-		explicit multistepper_wrapper(
-				boost::python::object sys,
-				boost::python::object time,
-				boost::python::object eventlist=boost::python::object(),
-				num_type min_step_size=0.00001)
-			: base_type(sys, time, eventlist, min_step_size) {}
 		
+		using base_type::explicit_stepper_wrapper;
+		void reset() { 
+			base_type::stepper.reset();
+			base_type::revert_possible = false;
+		}
+	};
+	template<typename stepper_type>
+	class error_multistepper_wrapper : public error_stepper_wrapper<stepper_type> {
+		typedef error_stepper_wrapper<stepper_type> base_type;
+	public:
+		typedef typename base_type::state_type state_type;
+		typedef typename base_type::num_type num_type;
+
+		using base_type::error_stepper_wrapper;
 		void reset() { 
 			base_type::stepper.reset();
 			base_type::revert_possible = false;
@@ -328,7 +340,7 @@ namespace lyapunov {
 
 	boost::python::object find_root(stepper_wrapper& stepper, 
 									boost::python::object events, 
-								  	double tolerance) {
+								  	double tolerance=0.00001) {
 		//implements a simple bisection rootfinder
 		//make this an independent function, pass in system, min_step_size?
 		//should events be a property of system? should they be a set?
@@ -336,13 +348,6 @@ namespace lyapunov {
 		namespace bp = boost::python;
 		typedef typename stepper_wrapper::num_type num_type;
 		typedef typename stepper_wrapper::state_type state_type;
-
-		//Revert (need to be able to step back across the boundary)
-		num_type limit_time = bp::extract<num_type>(stepper.get_system().attr("state")[0]);
-		if(!stepper.revert()) RevertError();
-		//Initialize interval
-		Interval interval = {bp::extract<num_type>(stepper.get_system().attr("state")[0]),
-							 limit_time};
 
 		//Loop over events
 			//call and store event function values to vector
@@ -352,6 +357,27 @@ namespace lyapunov {
 			event = iter.attr("next")();
 			x = bp::extract<num_type>(event());
 		}
+
+		//Revert (need to be able to step back across the boundary)
+		num_type limit_time = bp::extract<num_type>(stepper.get_system().attr("state")[0]);
+		std_revert(stepper); //raises a python exception if revert fails
+		//Initialize interval
+		Interval interval = {bp::extract<num_type>(stepper.get_system().attr("state")[0]),
+							 limit_time};
+
+		//Loop over events again
+			//check for changed signs - if none, raise an exception
+			//call and store event function values to vector
+		iter = events.attr("__iter__")();
+		num_type new_value;
+		bool event_occurred = false;
+		for(auto& x : starting_values) {
+			event = iter.attr("next")();
+			new_value = bp::extract<num_type>(event());
+			if(x*new_value < 0) event_occurred = true;
+			x = bp::extract<num_type>(event());
+		}
+		if(!event_occurred) RuntimeError("No boundary was crossed.");
 
 		bool boundary_crossed = false;
 		while(interval.length() > tolerance) {
@@ -365,7 +391,7 @@ namespace lyapunov {
 				if(boundary_crossed) break;
 			}
 			if(boundary_crossed) {
-				if(!stepper.revert()) RevertError(); //may not need this check
+				stepper.revert();
 				interval.upper = interval.midpoint();
 				boundary_crossed = false;
 			} else interval.lower = interval.midpoint();
@@ -380,7 +406,7 @@ namespace lyapunov {
 			if(x * bp::extract<num_type>(event()) < 0) 
 				flagged.append(event);
 		}
-		if(!stepper.revert()) RevertError(); //may not need this check
+		stepper.revert();
 		return flagged; //return interval.length()?
 	}
 }
@@ -473,10 +499,28 @@ BOOST_PYTHON_MODULE(solvers) {
 	typedef ode::runge_kutta_fehlberg78<state_type> fehlberg87; //order 7 error est.
 	LYAPUNOV_EXPOSE_ERROR_STEPPER(fehlberg87)
 
+	typedef ode::runge_kutta_dopri5<state_type> dormand_prince;
+	typedef error_multistepper_wrapper<dormand_prince> dopri_wrap;
+	class_<dopri_wrap>("dormand_prince", 
+					   init<object, object, optional<object, double> >())
+		.def("step", &dopri_wrap::step) \
+		.def("reset", &dopri_wrap::reset) \
+		.def("revert", &dopri_wrap::revert) \
+		.def("__iter__", pass_through) \
+		.def("next", &dopri_wrap::next) \
+		.def("step_through", &dopri_wrap::step_through) \
+		.def("use_times", &dopri_wrap::use_times) \
+		.def_readwrite("tolerance", &dopri_wrap::tolerance) \
+		.add_property("events", &dopri_wrap::get_events, &dopri_wrap::set_events) \
+		.add_property("system", &dopri_wrap::get_system, &dopri_wrap::set_system) \
+		.add_property("error", &dopri_wrap::get_error); 
+
 	LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth)
 	//ode::adams_moulton has a weird extra argument for do_step (a buffer?)
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_moulton)
 	//ode::adams_bashforth_moulton lacks a reset method for some reason (a bug?)
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth_moulton)
+	
+	//think about Bulirsch-Stoer solver too!
 }
 
