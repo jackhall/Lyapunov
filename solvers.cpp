@@ -237,7 +237,17 @@ namespace lyapunov {
 			saved_information = BOUNDARY;
 			return flagged; 
 		}
-		virtual boost::python::object get_error() const { NotImplementedError(); }
+		boost::python::str get_status() const {
+			switch(saved_information) {
+				case NOTHING:
+					return "nothing";
+				case LAST:
+					return "last step";
+				case BOUNDARY:
+					return "boundary";
+				default:
+			}
+		}
 	};
 	template<typename stepper_type>
 	class explicit_stepper_wrapper : public stepper_wrapper {
@@ -254,7 +264,6 @@ namespace lyapunov {
 			saved_time = bp::extract<num_type>(state_tup[0]);
 			saved_state = bp::extract<state_type>(state_tup[1]);
 			saved_information = LAST;
-			//can I alter system.state in place? if not, use a temporary vector?
 			stepper.do_step(system_function, 
 							saved_state, 
 							saved_time, 
@@ -269,14 +278,18 @@ namespace lyapunov {
 			saved_information = NOTHING;
 		}
 	};
-	template<typename stepper_type>
+	template<typename stepper_type, unsigned int stepper_order, unsigned int error_order>
 	class error_stepper_wrapper : public explicit_stepper_wrapper<stepper_type> {
 		typedef explicit_stepper_wrapper<stepper_type> base_type;
 	public:
 		typedef typename base_type::state_type state_type;
 		typedef typename base_type::num_type num_type;
+		num_type minimum_step_size, absolute_tolerance, relative_tolerance;
+		int steps_taken;
+
 	private:
 		state_type error;
+		num_type step_size;
 		using base_type::stepper;
 		using base_type::system;
 		using base_type::system_function;
@@ -290,15 +303,31 @@ namespace lyapunov {
 		error_stepper_wrapper() = delete;
 		error_stepper_wrapper(boost::python::object sys,
 							  boost::python::object time)
-			: base_type(sys, time), error(base_type::saved_state.size()) {}
+			: base_type(sys, time), 
+			  minimum_step_size(),
+			  absolute_tolerance(),
+			  relative_tolerance(),
+			  steps_taken(0),
+			  error(saved_state.size()),
+	   		  step_size() {}
 		
-		void step(num_type next_time) {
+		virtual void step(num_type next_time) {
 			namespace bp = boost::python;
 			bp::object state_tup = system.attr("state");
 			saved_time = bp::extract<num_type>(state_tup[0]);
 			saved_state = bp::extract<state_type>(state_tup[1]);
 			saved_information = LAST;
-			//can I alter system.state in place? if not, use a temporary vector?
+			//note: a private do_step subroutine is probably a good idea
+			//while current_time < next_time
+				//if step_size < (next_time - current_time)
+					//step with step_size
+					//if error_index<0.5
+						//calculate new step size
+				//else
+					//step with (next_time - current_time)
+				//if error_index>1 
+					//calculate new step size
+			//set system state
 			stepper.do_step(system_function, 
 							saved_state, 
 							saved_time, 
@@ -307,10 +336,9 @@ namespace lyapunov {
 							error); //(sys, xin, tin, xout, h, e)
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
-		boost::python::object get_error() { 
-			if(saved_information != LAST) return boost::python::tuple(error); 
-			else RuntimeError("No error estimate has been calcuated.");
-		} 
+		virtual void reset() {}
+
+		}
 	};
 	template<typename stepper_wrapper_type>
 	struct multistepper_wrapper : public stepper_wrapper_type {
