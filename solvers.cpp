@@ -30,7 +30,6 @@
 
 namespace lyapunov {
 	
-	//needed for element-wise list adding
 	void NotImplementedError() {
 		PyErr_SetString(PyExc_NotImplementedError, "Feature not provided."); 
 		boost::python::throw_error_already_set();
@@ -41,6 +40,10 @@ namespace lyapunov {
 	}
 	void RuntimeError(const char* error_string) {
 		PyErr_SetString(PyExc_RuntimeError, error_string);
+		boost::python::throw_error_already_set();
+	}
+	void ValueError(const char* error_string) {
+		PyErr_SetString(PyExc_ValueError, error_string);
 		boost::python::throw_error_already_set();
 	}
 	void StopIteration() { 
@@ -142,14 +145,14 @@ namespace lyapunov {
 		}
 		
 	public:
-		num_type event_tolerance;
+		num_type time_tolerance;
 		bool tracking_events;
 
 		stepper_wrapper() = delete;
 		stepper_wrapper(boost::python::object sys, 
 					    boost::python::object time)
 			: system(sys), 
-			  steps( time.attr("__iter__")() ), 
+			  steps(), 
 			  saved_state( boost::python::len(sys.attr("state")[1]) ),
 			  event_signs(),
 			  saved_time(0.0),
@@ -160,27 +163,42 @@ namespace lyapunov {
 				namespace bp = boost::python;
 				system.attr("state") = bp::make_tuple(t, x);
 				dx = bp::extract<state_type>(system()); } ),
-			  event_tolerance(0.001),
+			  time_tolerance(0.001),
 			  tracking_events(PyObject_HasAttrString(sys.ptr(), "events")) {
+			use_times(time);
 			update_signs(); //passes through if !tracking_events
 		}
 		virtual void step(num_type next_time) = 0;
 		virtual void step_back() = 0;
 		virtual void reset() { saved_information = NOTHING; }
-		void step_across() { 
+		void step_across(boost::python::object new_state = boost::python::object()) { 
 			namespace bp = boost::python;
 			if(saved_information != BOUNDARY) RuntimeError("No boundary to step across.");
-			system.attr("state") = bp::make_tuple(saved_time, saved_state);
-			saved_information = NOTHING;
+			bp::object state_tup;
+			if(new_state.is_none()) state_tup = bp::make_tuple(saved_time, saved_state);
+			else state_tup = bp::make_tuple(saved_time, new_state);
+			system.attr("state") = state_tup;
+			reset();
+		}
+		num_type get_step_size() const { 
+			namespace bp = boost::python;
+			if(saved_information == LAST) 
+				return bp::extract<num_type>(system.attr("state")[0]) - saved_time;
+			else RuntimeError("Last state not saved.");
+		}
+		num_type get_time_tolerance() const { return time_tolerance; }
+		void set_time_tolerance(num_type new_tolerance) {
+			if(new_tolerance > 0) time_tolerance = new_tolerance;
+			else ValueError("Negative values not allowed.");
 		}
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
-		void use_times(boost::python::object time) {
+		virtual void use_times(boost::python::object time) {
 			//stepper does not store the container, only the iterator
 			steps = time.attr("__iter__")(); 
 			next_time_obj = boost::python::object();
 		}
-		virtual boost::python::object next() {
+		boost::python::object next() {
 			namespace bp = boost::python;
 			//get time for this next step
 			if( next_time_obj.is_none() ) 
@@ -209,7 +227,7 @@ namespace lyapunov {
 			//initialize interval and step size goal
 			Interval interval = {saved_time, 
 								 bp::extract<num_type>(system.attr("state")[0]) };
-			num_type tolerance = event_tolerance * interval.length();
+			num_type tolerance = time_tolerance * interval.length();
 
 			//Revert (need to be able to step back across the boundary)
 			step_back();
@@ -254,6 +272,7 @@ namespace lyapunov {
 				case BOUNDARY:
 					return "boundary";
 				default:
+					return "status undefined!";
 			}
 		}
 	};
@@ -276,28 +295,33 @@ namespace lyapunov {
 							next_time - saved_time); //(sys, xin, tin, xout, h)
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
-		void step_back() {
+		virtual void step_back() {
 			namespace bp = boost::python;
 			if(saved_information != LAST) RuntimeError("Last state not saved.");
 			system.attr("state") = bp::make_tuple(saved_time, saved_state);
-			saved_information = NOTHING;
+			reset();
 		}
 	};
 	template<typename stepper_type, unsigned int stepper_order, unsigned int error_order>
-	class error_stepper_wrapper : public explicit_stepper_wrapper<stepper_type> {
+	class variable_stepper_wrapper : public explicit_stepper_wrapper<stepper_type> {
 		typedef explicit_stepper_wrapper<stepper_type> base_type;
 	public:
 		typedef typename base_type::state_type state_type;
 		typedef typename base_type::num_type num_type;
-		num_type minimum_step_size, absolute_tolerance, relative_tolerance;
-		int steps_taken;
+		using base_type::tracking_events;
 
-	private:
+	protected:
+		num_type absolute_tolerance, relative_tolerance;
 		state_type current_state, error;
-		num_type step_size;
+		num_type step_size, final_time;
 		using base_type::stepper;
 		using base_type::system;
 		using base_type::system_function;
+		using base_type::find_root;
+		using base_type::events_occurred;
+		using base_type::steps;
+		using base_type::time_tolerance;
+		using base_type::save_last;
 		using base_type::saved_state;
 		using base_type::temporary;
 		using base_type::saved_time;
@@ -305,25 +329,35 @@ namespace lyapunov {
 		using base_type::LAST;
 
 	public:
-		error_stepper_wrapper() = delete;
-		error_stepper_wrapper(boost::python::object sys,
-							  boost::python::object time) //initial step size? initial/final times?
-			: base_type(sys, boost::python::list()), 
-			  minimum_step_size(0.0001),
+		variable_stepper_wrapper() = delete;
+		variable_stepper_wrapper(boost::python::object sys,
+								 boost::python::object time) 
+			: base_type(sys, time), 
 			  absolute_tolerance(0.000001),
 			  relative_tolerance(0.001),
-			  steps_taken(0),
 			  current_state(saved_state.size()),
 			  error(saved_state.size()),
-	   		  step_size() { //default value here?
+	   		  step_size(-1), //default, a flag to recompute
+	   		  final_time(0.0) {}
+		num_type get_step_size() const { return step_size; }
+		num_type get_relative_tolerance() const { return relative_tolerance; }
+		void set_relative_tolerance(num_type new_tolerance) {
+			if(new_tolerance > 0) relative_tolerance = new_tolerance;
+			else ValueError("Negative values not allowed.");
+		}
+		num_type get_absolute_tolerance() const { return absolute_tolerance; }
+		void set_absolute_tolerance(num_type new_tolerance) {
+			if(new_tolerance > 0) absolute_tolerance = new_tolerance;
+			else ValueError("Negative values not allowed.");
+		}
+		virtual void use_times(boost::python::object time) {
 			namespace bp = boost::python;
-			if(PyNumber_Check(time.ptr())) 
+			if(PyNumber_Check(time.ptr())) {
 				steps = boost::python::object();
-				step_size = bp::extract<num_type>(time);
-			else {
-				use_times(time);
-				step_size = ; //default value?
-			}
+				final_time = bp::extract<num_type>(time);
+				step_size = 0.01*(final_time - 
+							bp::extract<num_type>(system.attr("state")[0]));
+			} else base_type::use_times(time);
 		}
 		double try_step(num_type current_time, num_type current_step_size) {
 			num_type error_index = 0.0;
@@ -333,7 +367,7 @@ namespace lyapunov {
 							temporary,
 							current_step_size,
 							error);
-			for(auto i=error.size(), i>=0, --i) {
+			for(auto i=error.size(); i>=0; --i) {
 				error_index = fmax(error_index, abs(error[i]) /
 							  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
 			}
@@ -344,6 +378,7 @@ namespace lyapunov {
 				//decrease step size
 				step_size = original_step_size * fmax(0.2, 0.9 *
 							pow(error_index, -1/(error_order - 1)));
+				step_size = fmax(step_size, time_tolerance);
 				return false;
 			} else if(error_index < 0.5) {
 				step_size = original_step_size * fmin(5, 0.9 * 
@@ -355,9 +390,9 @@ namespace lyapunov {
 			namespace bp = boost::python;
 			save_last();
 			bool step_successful = false;
-			num_type current_step_size;
+			num_type current_step_size = fmin(step_size, final_time - saved_time);
 			while(!step_successful) {
-				num_type error_index = try_step(saved_time, step_size);
+				num_type error_index = try_step(saved_time, current_step_size);
 				current_step_size = step_size; //in case it gets adjusted
 				step_successful = adjust_step(error_index, step_size);
 			}
@@ -370,23 +405,15 @@ namespace lyapunov {
 			auto current_time = saved_time; 
 			saved_state = current_state;
 			num_type current_step_size, error_index=0.0;
+			if(step_size < 0) step_size = next_time - current_time;
 			bool last_step = false;
 			while(true) {
 				current_step_size = next_time - current_time;
 				if(step_size < current_step_size) 
 					current_step_size = step_size;
 				else last_step = true;
-
-				stepper.do_step(system_function,
-								current_state,
-								current_time,
-								temporary,
-								current_step_size,
-								error);
-				for(auto i=error.size(), i>=0, --i) {
-					error_index = fmax(error_index, abs(error[i]) /
-								  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
-				}
+				
+				error_index = try_step(current_time, current_step_size);
 
 				if(error_index > 1.0) {
 					//calculate smaller step size
@@ -405,7 +432,8 @@ namespace lyapunov {
 			}
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
-		virtual boost::python::object next() {
+		boost::python::object next() {
+			namespace bp = boost::python;
 			if(steps.is_none()) {
 				free_step();
 				if( events_occurred() ) {
@@ -423,64 +451,101 @@ namespace lyapunov {
 	};
 	template<typename stepper_wrapper_type>
 	struct multistepper_wrapper : public stepper_wrapper_type {
-		using stepper_wrapper_type::state_type;
-		using stepper_wrapper_type::num_type;
-		
+		typedef typename stepper_wrapper_type::state_type state_type;
+		typedef typename stepper_wrapper_type::num_type num_type;
+	
+		using stepper_wrapper_type::stepper;
+		using stepper_wrapper_type::saved_information;
+		using stepper_wrapper_type::tracking_events;
 		using stepper_wrapper_type::stepper_wrapper_type;
-		void reset() { 
-			stepper_wrapper_type::stepper.reset(); //use initialize instead?
-			stepper_wrapper_type::saved_information = stepper_wrapper_type::NOTHING;
+		virtual void reset() {
+			stepper.reset();
+			stepper_wrapper_type::reset();
 		}
 	};
 }
 //macros for exposing wrapped steppers
 //assumes 'using namespace boost::python'
 //no semicolon afterwards
-//TO DO: make steppers iterable (see std_iterator above for reference)
-#define LYAPUNOV_EXPOSE_SIMPLE_STEPPER(STEPPER) { \
-class_< explicit_stepper_wrapper< STEPPER > >(#STEPPER, init<object, object>()) \
-	.def("step_back", &explicit_stepper_wrapper< STEPPER >::step_back) \
-	.def("reset", &explicit_stepper_wrapper< STEPPER >::reset) \
-	.def("__iter__", pass_through) \
-	.def("next", &explicit_stepper_wrapper< STEPPER >::next) \
-	.def("step_across", &explicit_stepper_wrapper< STEPPER >::step_across) \
-	.def_readwrite("event_tolerance", &explicit_stepper_wrapper< STEPPER >::event_tolerance) \
-	.def_readwrite("tracking_events", &explicit_stepper_wrapper< STEPPER >::tracking_events) \
-	.def("use_times", &explicit_stepper_wrapper< STEPPER >::use_times) \
-	.add_property("system", &explicit_stepper_wrapper< STEPPER >::get_system, &explicit_stepper_wrapper< STEPPER >::set_system); }
-
 #define LYAPUNOV_EXPOSE_STEPPER(STEPPER, WRAPPER) { \
 class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
 	.def("step_back", &WRAPPER< STEPPER >::step_back) \
+	.def("step_across", &WRAPPER< STEPPER >::step_across) \
 	.def("reset", &WRAPPER< STEPPER >::reset) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER >::next) \
-	.def("step_across", &WRAPPER< STEPPER >::step_across) \
-	.def_readwrite("event_tolerance", &WRAPPER< STEPPER >::event_tolerance) \
+	.add_property("status", &WRAPPER< STEPPER >::get_status) \
+	.add_property("time_tolerance", &WRAPPER< STEPPER >::get_time_tolerance, &WRAPPER< STEPPER >::set_time_tolerance) \
 	.def_readwrite("tracking_events", &WRAPPER< STEPPER >::tracking_events) \
+	.add_property("step_size", &WRAPPER< STEPPER >::get_step_size) \
 	.def("use_times", &WRAPPER< STEPPER >::use_times) \
-	.add_property("system", &WRAPPER< STEPPER >::get_system, &WRAPPER< STEPPER >::set_system) \
-	.add_property("error", &WRAPPER< STEPPER >::get_error); }
+	.add_property("system", &WRAPPER< STEPPER >::get_system, &WRAPPER< STEPPER >::set_system); }
 
-//macros to help with variable order solvers
+#define LYAPUNOV_EXPOSE_VARIABLE_STEPPER(STEPPER, WRAPPER, ORDER, ERROR) { \
+class_< WRAPPER< STEPPER, ORDER, ERROR > >(#STEPPER, init<object, object>()) \
+	.def("step_back", &WRAPPER< STEPPER, ORDER, ERROR >::step_back) \
+	.def("step_across", &WRAPPER< STEPPER, ORDER, ERROR >::step_across) \
+	.def("reset", &WRAPPER< STEPPER, ORDER, ERROR >::reset) \
+	.def("__iter__", pass_through) \
+	.def("next", &WRAPPER< STEPPER, ORDER, ERROR >::next) \
+	.add_property("status", &WRAPPER< STEPPER, ORDER, ERROR >::get_status) \
+	.add_property("time_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_time_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_time_tolerance) \
+	.add_property("relative_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_relative_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_relative_tolerance) \
+	.add_property("absolute_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_absolute_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_absolute_tolerance) \
+	.def_readwrite("tracking_events", &WRAPPER< STEPPER, ORDER, ERROR >::tracking_events) \
+	.add_property("step_size", &WRAPPER< STEPPER, ORDER, ERROR >::get_step_size) \
+	.def("use_times", &WRAPPER< STEPPER, ORDER, ERROR >::use_times) \
+	.add_property("system", &WRAPPER< STEPPER, ORDER, ERROR >::get_system, &WRAPPER< STEPPER, ORDER, ERROR >::set_system); }
+
+#define LYAPUNOV_EXPOSE_MULTISTEPPER(STEPPER, WRAPPER) { \
+class_< multistepper_wrapper< WRAPPER< STEPPER > > >(#STEPPER, init<object, object>()) \
+	.def("step_back", &multistepper_wrapper< WRAPPER< STEPPER > >::step_back) \
+	.def("step_across", &multistepper_wrapper< WRAPPER< STEPPER > >::step_across) \
+	.def("reset", &multistepper_wrapper< WRAPPER< STEPPER > >::reset) \
+	.def("__iter__", pass_through) \
+	.def("next", &multistepper_wrapper< WRAPPER< STEPPER > >::next) \
+	.add_property("status", &multistepper_wrapper< WRAPPER< STEPPER > >::get_status) \
+	.add_property("time_tolerance", &multistepper_wrapper< WRAPPER< STEPPER > >::get_time_tolerance, &WRAPPER< STEPPER >::set_time_tolerance) \
+	.def_readwrite("tracking_events", &multistepper_wrapper< WRAPPER< STEPPER > >::tracking_events) \
+	.add_property("step_size", &multistepper_wrapper< WRAPPER< STEPPER > >::get_step_size) \
+	.def("use_times", &multistepper_wrapper< WRAPPER< STEPPER > >::use_times) \
+	.add_property("system", &multistepper_wrapper< WRAPPER< STEPPER > >::get_system, &WRAPPER< STEPPER >::set_system); }
+
+#define LYAPUNOV_EXPOSE_VARIABLE_MULTISTEPPER(STEPPER, WRAPPER, ERROR, ORDER) { \
+class_< multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > > >(#STEPPER, init<object, object>()) \
+	.def("step_back", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::step_back) \
+	.def("step_across", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::step_across) \
+	.def("reset", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::reset) \
+	.def("__iter__", pass_through) \
+	.def("next", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::next) \
+	.add_property("status", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::get_status) \
+	.add_property("time_tolerance", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::get_time_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_time_tolerance) \
+	.add_property("relative_tolerance", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::get_relative_tolerance, &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::set_relative_tolerance) \
+	.add_property("absolute_tolerance", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::get_absolute_tolerance, &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::set_absolute_tolerance) \
+	.def_readwrite("tracking_events", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::tracking_events) \
+	.add_property("step_size", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::get_step_size) \
+	.def("use_times", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::use_times) \
+	.add_property("system", &multistepper_wrapper< WRAPPER< STEPPER, ORDER, ERROR > >::get_system, &WRAPPER< STEPPER, ORDER, ERROR >::set_system); }
+
+//macro to help with variable order solvers
 //no semicolon afterwards
 #define LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(VARSTEPPER) { \
 typedef ode::VARSTEPPER<1, state_type> VARSTEPPER##1; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##1); \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##1, explicit_stepper_wrapper); \
 typedef ode::VARSTEPPER<2, state_type> VARSTEPPER##2; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##2); \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##2, explicit_stepper_wrapper); \
 typedef ode::VARSTEPPER<3, state_type> VARSTEPPER##3; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##3); \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##3, explicit_stepper_wrapper); \
 typedef ode::VARSTEPPER<4, state_type> VARSTEPPER##4; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##4); \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##4, explicit_stepper_wrapper); \
 typedef ode::VARSTEPPER<5, state_type> VARSTEPPER##5; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##5); \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##5, explicit_stepper_wrapper); \
 typedef ode::VARSTEPPER<6, state_type> VARSTEPPER##6; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##6); \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##6, explicit_stepper_wrapper); \
 typedef ode::VARSTEPPER<7, state_type> VARSTEPPER##7; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##7); \
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##7, explicit_stepper_wrapper); \
 typedef ode::VARSTEPPER<8, state_type> VARSTEPPER##8; \
-LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##8); }
+LYAPUNOV_EXPOSE_MULTISTEPPER(VARSTEPPER##8, explicit_stepper_wrapper); }
 
 BOOST_PYTHON_MODULE(solvers) {
 	using namespace boost::python;
@@ -494,8 +559,6 @@ BOOST_PYTHON_MODULE(solvers) {
 	typedef stepper_wrapper::num_type num_type;
 	typedef stepper_wrapper::state_type state_type;
 
-	//add saved_information observation (return a string)
-
 	typedef ode::euler<state_type> euler;
 	LYAPUNOV_EXPOSE_STEPPER(euler, explicit_stepper_wrapper)
 	typedef ode::modified_midpoint<state_type> modified_midpoint;
@@ -504,35 +567,20 @@ BOOST_PYTHON_MODULE(solvers) {
 	LYAPUNOV_EXPOSE_STEPPER(runge_kutta4, explicit_stepper_wrapper)
 
 	typedef ode::runge_kutta_cash_karp54<state_type> cash_karp;
-	LYAPUNOV_EXPOSE_STEPPER(cash_karp, error_stepper_wrapper)
+	LYAPUNOV_EXPOSE_VARIABLE_STEPPER(cash_karp, variable_stepper_wrapper, 5, 4)
 	typedef ode::runge_kutta_fehlberg78<state_type> fehlberg87; //order 7 error est.
-	LYAPUNOV_EXPOSE_STEPPER(fehlberg87, error_stepper_wrapper)
+	LYAPUNOV_EXPOSE_VARIABLE_STEPPER(fehlberg87, variable_stepper_wrapper, 8, 7)
 
-	//turn error_stepper_wrapper into a variable_stepper_wrapper
-	//remove error observation
+	typedef ode::runge_kutta_dopri5<state_type> dormand_prince;
+	LYAPUNOV_EXPOSE_VARIABLE_MULTISTEPPER(dormand_prince, variable_stepper_wrapper, 5, 4)
 
-	//typedef ode::runge_kutta_dopri5<state_type> dormand_prince;
-	//typedef error_multistepper_wrapper<dormand_prince> dopri_wrap;
-	//class_<dopri_wrap>("dormand_prince", 
-	//				   init<object, object, optional<object, double> >())
-	//	.def("step", &dopri_wrap::step) \
-	//	.def("reset", &dopri_wrap::reset) \
-	//	.def("step_back", &dopri_wrap::step_back) \
-	//	.def("__iter__", pass_through) \
-	//	.def("next", &dopri_wrap::next) \
-	//	.def("step_across", &dopri_wrap::step_across) \
-	//	.def("use_times", &dopri_wrap::use_times) \
-	//	.def_readwrite("tolerance", &dopri_wrap::tolerance) \
-	//	.add_property("events", &dopri_wrap::get_events, &dopri_wrap::set_events) \
-	//	.add_property("system", &dopri_wrap::get_system, &dopri_wrap::set_system) \
-	//	.add_property("error", &dopri_wrap::get_error); 
-
-	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth)
+	LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth)
 	//ode::adams_moulton has a weird extra argument for do_step (a buffer?)
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_moulton)
 	//ode::adams_bashforth_moulton lacks a reset method for some reason (a bug?)
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth_moulton)
 	
 	//think about Bulirsch-Stoer solver too!
+	//write a dense_stepper_wrapper?
 }
 
