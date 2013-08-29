@@ -133,7 +133,14 @@ namespace lyapunov {
 				}
 			}
 		}
-
+		void save_last() {
+			namespace bp = boost::python;
+			bp::object state_tup = system.attr("state");
+			saved_time = bp::extract<num_type>(state_tup[0]);
+			saved_state = bp::extract<state_type>(state_tup[1]);
+			saved_information = LAST;
+		}
+		
 	public:
 		num_type event_tolerance;
 		bool tracking_events;
@@ -173,7 +180,7 @@ namespace lyapunov {
 			steps = time.attr("__iter__")(); 
 			next_time_obj = boost::python::object();
 		}
-		boost::python::object next() {
+		virtual boost::python::object next() {
 			namespace bp = boost::python;
 			//get time for this next step
 			if( next_time_obj.is_none() ) 
@@ -260,11 +267,8 @@ namespace lyapunov {
 		using stepper_wrapper::stepper_wrapper;
 		
 		void step(num_type next_time) {
+			save_last();
 			namespace bp = boost::python;
-			bp::object state_tup = system.attr("state");
-			saved_time = bp::extract<num_type>(state_tup[0]);
-			saved_state = bp::extract<state_type>(state_tup[1]);
-			saved_information = LAST;
 			stepper.do_step(system_function, 
 							saved_state, 
 							saved_time, 
@@ -303,37 +307,68 @@ namespace lyapunov {
 	public:
 		error_stepper_wrapper() = delete;
 		error_stepper_wrapper(boost::python::object sys,
-							  boost::python::object time)
-			: base_type(sys, time), 
-			  minimum_step_size(),
-			  absolute_tolerance(),
-			  relative_tolerance(),
+							  boost::python::object time) //initial step size? initial/final times?
+			: base_type(sys, boost::python::list()), 
+			  minimum_step_size(0.0001),
+			  absolute_tolerance(0.000001),
+			  relative_tolerance(0.001),
 			  steps_taken(0),
 			  current_state(saved_state.size()),
 			  error(saved_state.size()),
-	   		  step_size() {}
-		
-		double try_step(num_type current_time, num_type local_step_size) {
+	   		  step_size() { //default value here?
+			namespace bp = boost::python;
+			if(PyNumber_Check(time.ptr())) 
+				steps = boost::python::object();
+				step_size = bp::extract<num_type>(time);
+			else {
+				use_times(time);
+				step_size = ; //default value?
+			}
+		}
+		double try_step(num_type current_time, num_type current_step_size) {
+			num_type error_index = 0.0;
 			stepper.do_step(system_function,
 							current_state,
 							current_time,
 							temporary,
-							local_step_size,
+							current_step_size,
 							error);
-			num_type error_index, max_error_index = 0;
 			for(auto i=error.size(), i>=0, --i) {
-				error_index = abs(error[i]) /
-							  (absolute_tolerance - relative_tolerance*abs(temporary[i]));
-				if(error_index > max_error_index) max_error_index = error_index;
+				error_index = fmax(error_index, abs(error[i]) /
+							  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
 			}
-			return max_error_index;
+			return error_index;
+		}
+		bool adjust_step(num_type error_index, num_type original_step_size) {
+			if(error_index > 1.0) {
+				//decrease step size
+				step_size = original_step_size * fmax(0.2, 0.9 *
+							pow(error_index, -1/(error_order - 1)));
+				return false;
+			} else if(error_index < 0.5) {
+				step_size = original_step_size * fmin(5, 0.9 * 
+							pow(error_index, -1/stepper_order));
+			} 
+			return true;
+		}
+		void free_step() {
+			namespace bp = boost::python;
+			save_last();
+			bool step_successful = false;
+			num_type current_step_size;
+			while(!step_successful) {
+				num_type error_index = try_step(saved_time, step_size);
+				current_step_size = step_size; //in case it gets adjusted
+				step_successful = adjust_step(error_index, step_size);
+			}
+			system.attr("state") = bp::make_tuple(saved_time + current_step_size, 
+												  temporary);
 		}
 		virtual void step(num_type next_time) {
 			namespace bp = boost::python;
-			bp::object state_tup = system.attr("state");
-			auto current_time = saved_time = bp::extract<num_type>(state_tup[0]);
-			saved_state = current_state = bp::extract<state_type>(state_tup[1]);
-			saved_information = LAST;
+			save_last();
+			auto current_time = saved_time; 
+			saved_state = current_state;
 			num_type current_step_size, error_index=0.0;
 			bool last_step = false;
 			while(true) {
@@ -342,7 +377,6 @@ namespace lyapunov {
 					current_step_size = step_size;
 				else last_step = true;
 
-				error_index = try_step(current_time, current_step_size);
 				stepper.do_step(system_function,
 								current_state,
 								current_time,
@@ -355,21 +389,37 @@ namespace lyapunov {
 				}
 
 				if(error_index > 1.0) {
-					//calculate smaller step size from current_step_size
-					//continue
+					//calculate smaller step size
+					adjust_step(error_index, current_step_size);
+					error_index = 0.0;
+					continue;
 				} else if(last_step) {
 					break;
 				} else if(error_index < 0.5) {
-					//calculate larger step size from step_size
-				} else {
-
+					//calculate larger step size
+					adjust_step(error_index, current_step_size);
+					error_index = 0.0;
 				}
+				current_time += current_step_size;
+				std::swap(current_state, temporary);
 			}
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
-		virtual void reset() {}
-
-		}
+		virtual boost::python::object next() {
+			if(steps.is_none()) {
+				free_step();
+				if( events_occurred() ) {
+					auto flagged = find_root();
+					return bp::make_tuple(system.attr("state")[0], flagged);
+				} else {
+					if(tracking_events) 
+						return bp::make_tuple(system.attr("state")[0], bp::list());
+					else return system.attr("state")[0];
+				}
+			} else {
+				return base_type::next();
+			}
+		}	
 	};
 	template<typename stepper_wrapper_type>
 	struct multistepper_wrapper : public stepper_wrapper_type {
@@ -382,22 +432,7 @@ namespace lyapunov {
 			stepper_wrapper_type::saved_information = stepper_wrapper_type::NOTHING;
 		}
 	};
-	template<typename stepper_type>
-	class controlled_stepper_wrapper : public stepper_wrapper {
-		typedef stepper_wrapper base_type;
-		stepper_type stepper; //must be a Controlled Stepper
-		state_type absolute_tolerance, relative_tolerance;
-
-	public:
-		void step(num_type next_time) {
-			
-		}
-		bool step_back() {
-			return true;
-		}
-	};
 }
-
 //macros for exposing wrapped steppers
 //assumes 'using namespace boost::python'
 //no semicolon afterwards
