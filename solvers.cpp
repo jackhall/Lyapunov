@@ -18,6 +18,7 @@
 	The author may be reached at jackhall@utexas.edu.
 */
 
+#include <cmath>
 #include <iostream>
 #include <vector>
 #include <functional>
@@ -288,7 +289,7 @@ namespace lyapunov {
 		int steps_taken;
 
 	private:
-		state_type error;
+		state_type current_state, error;
 		num_type step_size;
 		using base_type::stepper;
 		using base_type::system;
@@ -308,32 +309,62 @@ namespace lyapunov {
 			  absolute_tolerance(),
 			  relative_tolerance(),
 			  steps_taken(0),
+			  current_state(saved_state.size()),
 			  error(saved_state.size()),
 	   		  step_size() {}
 		
+		double try_step(num_type current_time, num_type local_step_size) {
+			stepper.do_step(system_function,
+							current_state,
+							current_time,
+							temporary,
+							local_step_size,
+							error);
+			num_type error_index, max_error_index = 0;
+			for(auto i=error.size(), i>=0, --i) {
+				error_index = abs(error[i]) /
+							  (absolute_tolerance - relative_tolerance*abs(temporary[i]));
+				if(error_index > max_error_index) max_error_index = error_index;
+			}
+			return max_error_index;
+		}
 		virtual void step(num_type next_time) {
 			namespace bp = boost::python;
 			bp::object state_tup = system.attr("state");
-			saved_time = bp::extract<num_type>(state_tup[0]);
-			saved_state = bp::extract<state_type>(state_tup[1]);
+			auto current_time = saved_time = bp::extract<num_type>(state_tup[0]);
+			saved_state = current_state = bp::extract<state_type>(state_tup[1]);
 			saved_information = LAST;
-			//note: a private do_step subroutine is probably a good idea
-			//while current_time < next_time
-				//if step_size < (next_time - current_time)
-					//step with step_size
-					//if error_index<0.5
-						//calculate new step size
-				//else
-					//step with (next_time - current_time)
-				//if error_index>1 
-					//calculate new step size
-			//set system state
-			stepper.do_step(system_function, 
-							saved_state, 
-							saved_time, 
-							temporary, 
-							next_time - saved_time, 
-							error); //(sys, xin, tin, xout, h, e)
+			num_type current_step_size, error_index=0.0;
+			bool last_step = false;
+			while(true) {
+				current_step_size = next_time - current_time;
+				if(step_size < current_step_size) 
+					current_step_size = step_size;
+				else last_step = true;
+
+				error_index = try_step(current_time, current_step_size);
+				stepper.do_step(system_function,
+								current_state,
+								current_time,
+								temporary,
+								current_step_size,
+								error);
+				for(auto i=error.size(), i>=0, --i) {
+					error_index = fmax(error_index, abs(error[i]) /
+								  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
+				}
+
+				if(error_index > 1.0) {
+					//calculate smaller step size from current_step_size
+					//continue
+				} else if(last_step) {
+					break;
+				} else if(error_index < 0.5) {
+					//calculate larger step size from step_size
+				} else {
+
+				}
+			}
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
 		virtual void reset() {}
