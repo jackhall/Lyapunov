@@ -197,6 +197,7 @@ namespace lyapunov {
 			//stepper does not store the container, only the iterator
 			steps = time.attr("__iter__")(); 
 			next_time_obj = boost::python::object();
+			reset();
 		}
 		boost::python::object next() {
 			namespace bp = boost::python;

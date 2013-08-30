@@ -72,7 +72,6 @@ import numpy
 import inspect
 import matplotlib.pyplot as plt
 import solvers
-from solvers import find_root
 
 #################
 # System manipulation
@@ -411,6 +410,7 @@ class StopIntegration(Exception):
 		return repr(self.name)
 
 
+#deprecated
 class Time(object):
 	"""
 	An iterable that acts like a time list.
@@ -495,6 +495,8 @@ class Time(object):
 			yield t
 
 
+#################
+# Simulation Utilties
 class Recorder(object):
 	"""
 	Records system data during a Solver simulation through callbacks.
@@ -578,6 +580,17 @@ class Recorder(object):
 		plt.show()
 
 
+def check_NaN(system):
+	""" 
+	Check to make sure system states are still numbers. 
+	Raises an exception otherwise.
+	"""
+	if any( map(math.isnan, system.state[1]) ):
+		raise ArithmeticError("System state is NaN!")
+
+#################
+
+#deprecated
 def simulate(system, time_sequence, **kwargs):
 	"""
 	An ODE solver function for numerically integrating system objects.
@@ -668,36 +681,4 @@ def simulate(system, time_sequence, **kwargs):
 	system.state = original_state
 	return logger
 
-
-
-	#def phase_portrait(self):
-	#	#Number of arrows per dimension=20 is arbitrary but works well.
-	#	assert len(self.system) == 2
-	#	x, y = numpy.meshgrid(numpy.linspace(self.xmin, self.xmax, 20), 
-	#						  numpy.linspace(self.ymin, self.ymax, 20)) 
-	#	Dx, Dy = numpy.array(x), numpy.array(y)
-	#	for i in range(x.shape[0]):
-	#		for j in range(x.shape[1]):
-	#			coordinates = [float(x[i,j]), float(y[i,j])]
-	#			#only works for 2D systems so far...
-	#			self.system.state = coordinates #is it ok to assume a time slice is ok?
-	#			Dx[i,j], Dy[i,j] = self.system()
-	#	plt.quiver(x, y, Dx, Dy)
-
-#Here is a pythonic enum pattern:
-#def enum(**enums):
-#	return type('Enum', (), enums)
-#Numbers = enum(ONE=1, TWO=2.2222, THREE="three")
-#Numbers.ONE
-#Numbers.TWO
-#Numbers.THREE
-
-#...and another one
-#DIRECTIONS = set(['up', 'down', 'left', 'right'])
-#def move(self, direction):
-#	# only if you feel like checking
-#	assert direction in DIRECTIONS
-#	# you can still just use the strings!
-#	if direction == 'up':
-#		# Do something
 
