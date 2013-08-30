@@ -71,7 +71,7 @@ import operator
 import numpy
 import inspect
 import matplotlib.pyplot as plt
-import solvers
+from solvers import *
 
 #################
 # System manipulation
