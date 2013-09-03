@@ -1,48 +1,48 @@
 #!/usr/bin/env python
 """
-Lyapunov is a toolbox for integrating dynamical systems. 
+    Lyapunov is a toolbox for integrating dynamical systems. 
 
-Instead of treating systems as functions, lyapunov represents systems as 
-objects. Not only does this significantly clean up the solver interface, but 
-it also encourages the encapsulation of subsystems. Exposed classes:
+    Instead of treating systems as functions, lyapunov represents systems as 
+    objects. Not only does this significantly clean up the solver interface, but 
+    it also encourages the encapsulation of subsystems. Exposed classes:
 
-Recorder - A way to track and later plot any system data. 
-CompositeSystem - A container/manager for subsystems, itself a system.
-Filter - A linear filter of arbitrary order. 
-Time - A convenient way of creating and manipulating time iterables.
-StepSignal - Generates a step signal.
-SquareWave - Generates a square wave.
-SineWave - Generates an sinusoid.
-ChirpSignal - Generates a sinusoid with an arbitrary instantaneous frequency.
+    Recorder - A way to track and later plot any system data. 
+    CompositeSystem - A container/manager for subsystems, itself a system.
+    Filter - A linear filter of arbitrary order. 
+    Time - A convenient way of creating and manipulating time iterables.
+    StepSignal - Generates a step signal.
+    SquareWave - Generates a square wave.
+    SineWave - Generates an sinusoid.
+    ChirpSignal - Generates a sinusoid with an arbitrary instantaneous frequency.
 
-Exposed functions:
+    Exposed functions:
 
-simulate - a way to numerically integrate systems
+    simulate - a way to numerically integrate systems
 
---For a full description of Lyapunov's system concept, see lyapunov.simulate. 
+    --For a full description of Lyapunov's system concept, see lyapunov.simulate. 
 
---lyapunov.CompositeSystem provides a subsystem manager that itself 
-  implements the system interface, allowing the user to build arbitrarily 
-  complex hierarchies of subsystems.
+    --lyapunov.CompositeSystem provides a subsystem manager that itself 
+      implements the system interface, allowing the user to build arbitrarily 
+      complex hierarchies of subsystems.
 
---For convenient plotting state or output trajectories (in time or as a 
-  phase portrait), see lyapunov.Plotter. 
+    --For convenient plotting state or output trajectories (in time or as a 
+      phase portrait), see lyapunov.Plotter. 
 
---The file 'demo/motor_demo.py' has a full demonstration of the above 
-  features. 
+    --The file 'demo/motor_demo.py' has a full demonstration of the above 
+      features. 
 
---Event detection is included. See lyapunov.simulate for more information.
+    --Event detection is included. See lyapunov.simulate for more information.
 
---Code generation from symbolic input (from sympy) may happen at some point.
+    --Code generation from symbolic input (from sympy) may happen at some point.
 
-Integration of ordinary equations is done with solvers from 
-boost::numeric::odeint, wrapped using boost.python. See the makefile in the 
-main directory for tips on compiling. A C++11 capable compiler will be needed, 
-along with a recent copy of boost (1.53 or later). Compilation and linking 
-will result in a file called 'solvers.so' (or whatever suffix shared 
-libraries have on your system). Either place this file in the main directory 
-with 'lyapunov.py', or put both in whatever system directory python looks in 
-to import external modules.
+    Integration of ordinary equations is done with solvers from 
+    boost::numeric::odeint, wrapped using boost.python. See the makefile in the 
+    main directory for tips on compiling. A C++11 capable compiler will be needed, 
+    along with a recent copy of boost (1.53 or later). Compilation and linking 
+    will result in a file called 'solvers.so' (or whatever suffix shared 
+    libraries have on your system). Either place this file in the main directory 
+    with 'lyapunov.py', or put both in whatever system directory python looks in 
+    to import external modules.
 """
 
 #Lyapunov: a library for integrating nonlinear dynamical systems
@@ -396,7 +396,7 @@ class Filter(object):
 	def __call__(self):
 		return self._state[1:] + (self._xndot + self._gains[0]*self.signal(),)
 
-
+#deprecated
 class StopIntegration(Exception):
 	""" 
 	Exception to be thrown when the system encounters an
