@@ -82,15 +82,15 @@ print "\nMass-Spring-Damper w/PID control"
 print "initial state", sys2.state
 start = time.clock()
 count = 0
-for t in stepper:
-    print t
-    count+=1
-    if count > 10:
-        break
-    record.log()
+for t, events in stepper:
+    if events:
+        stepper.step_across()
+        sys2.reference.update()
+    record.log(events)
 print "time elapsed", time.clock() - start
 
 x_out = numpy.array(record.x)
 plt.figure()
 plt.plot(x_out[:,0], x_out[:,1])
+plt.show()
 

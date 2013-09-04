@@ -221,9 +221,7 @@ namespace lyapunov {
 				//reset next_time_obj to NoneType so the next call
 				//will continue iterating through steps
 				next_time_obj = bp::object();
-				if(tracking_events) 
-					return bp::make_tuple(system.attr("state")[0], bp::list());
-				else return system.attr("state")[0];
+				return bp::make_tuple(system.attr("state")[0], bp::list());
 			}
 		}
 		boost::python::object find_root() {
@@ -287,6 +285,7 @@ namespace lyapunov {
 		num_type absolute_tolerance, relative_tolerance;
 		state_type temporary, current_state, error;
 		num_type step_size, final_time;
+        bool final_time_reached;
 
 	public:
 		variable_stepper_wrapper() = delete;
@@ -299,7 +298,8 @@ namespace lyapunov {
 			  current_state(saved_state.size()),
 			  error(saved_state.size()),
 	   		  step_size(-1), //default, a flag to recompute
-	   		  final_time(0.0) {
+	   		  final_time(0.0), 
+              final_time_reached(false) {
 			use_times(time);
 		}
 		num_type get_step_size() const { return step_size; }
@@ -320,33 +320,49 @@ namespace lyapunov {
 				final_time = bp::extract<num_type>(time);
 				step_size = 0.01*(final_time - 
 							bp::extract<num_type>(system.attr("state")[0]));
+                final_time_reached = false;
 			} else base_type::use_times(time);
 		}
-		virtual double try_step(num_type current_time, num_type current_step_size) = 0;
-		virtual void increase_step(num_type error_index) = 0; 
-		virtual bool decrease_step(num_type error_index, num_type original_step_size) = 0;
+		virtual void try_step(num_type current_time, num_type current_step_size) = 0;
+        virtual void try_free_step(num_type current_step_size) = 0;
+        double compute_error_index() {
+            double error_index = 0.0;
+            for(int i=error.size()-1; i>=0; --i) {
+				error_index = fmax(error_index, abs(error[i]) /
+							  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
+			}
+            return error_index;
+        }
+		virtual void increase_step(num_type error_index) = 0; 		
+        virtual bool decrease_step(num_type error_index, num_type original_step_size) = 0;
 		bool adjust_step(num_type error_index, num_type original_step_size) {
 			increase_step(error_index);
 			return decrease_step(error_index, original_step_size);
 		}
 		void free_step() {
 			namespace bp = boost::python;
+            if(final_time_reached) StopIteration();
 			save_last();
-            auto current_time = saved_time;
-            current_state = saved_state;
 			bool step_successful = false;
 			num_type error_index, current_step_size;
 			if(step_size < (final_time - saved_time)) {
-				current_step_size = step_size;
 				while(!step_successful) {
-					error_index = try_step(saved_time, current_step_size); 
+				    current_step_size = step_size;
+                    try_free_step(current_step_size);
+                   	error_index = compute_error_index(); 
 					step_successful = adjust_step(error_index, step_size); 
 				}
 			} else {
 				current_step_size = final_time - saved_time;
+                final_time_reached = true;
 				while(!step_successful) {
-					error_index = try_step(saved_time, current_step_size); 
+                    try_free_step(current_step_size);
+				    error_index = compute_error_index(); 
 					step_successful = decrease_step(error_index, current_step_size); 
+                    if(!step_successful) {
+                        current_step_size = step_size;
+                        final_time_reached = false;
+                    }
 				}
 			}
 			system.attr("state") = bp::make_tuple(saved_time + current_step_size, 
@@ -366,8 +382,9 @@ namespace lyapunov {
 					current_step_size = step_size;
 					last_step = false;
 				} else last_step = true; //problem here?
-				
-				error_index = try_step(current_time, current_step_size);
+			    
+                try_step(current_time, current_step_size);
+               	error_index = compute_error_index();
 
 				if(error_index > 1.0) {
 					//calculate smaller step size
@@ -392,9 +409,7 @@ namespace lyapunov {
 					auto flagged = find_root();
 					return bp::make_tuple(system.attr("state")[0], flagged);
 				} else {
-					if(tracking_events) 
-						return bp::make_tuple(system.attr("state")[0], bp::list());
-					else return system.attr("state")[0];
+					return bp::make_tuple(system.attr("state")[0], bp::list());
 				}
 			} else {
 				return base_type::next();
@@ -446,29 +461,32 @@ namespace lyapunov {
 
 	public:
 		using variable_stepper_wrapper::variable_stepper_wrapper;
-		virtual double try_step(num_type current_time, num_type current_step_size) {
-			num_type error_index = 0.0;
+		virtual void try_step(num_type current_time, num_type current_step_size) {
 			stepper.do_step(system_function,
 							current_state,
 							current_time,
 							temporary,
 							current_step_size,
 							error);
-			for(int i=error.size()-1; i>=0; --i) {
-				error_index = fmax(error_index, abs(error[i]) /
-							  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
-			}
-			return error_index;
 		}
-		virtual void increase_step(num_type error_index) {
-			if(error_index < 0.5) 
-				step_size *= fmin(5, 0.9*pow(error_index, -1/stepper_order));
+		virtual void try_free_step(num_type current_step_size) {
+            stepper.do_step(system_function,
+                            saved_state,
+                            saved_time,
+                            temporary,
+                            current_step_size,
+                            error);
+        }
+        virtual void increase_step(num_type error_index) {
+			if(error_index < 0.5) {
+				step_size *= fmin(5, 0.9*pow(error_index, -1.0/stepper_order));
+            }
 		}
 		virtual bool decrease_step(num_type error_index, num_type original_step_size) {
 			if(error_index > 1.0) { //problems here
 				//decrease step size
 				step_size = original_step_size * fmax(0.2, 0.9 *
-							pow(error_index, -1/(error_order - 1)));
+							pow(error_index, -1.0/(error_order - 1.0)));
 				step_size = fmax(step_size, time_tolerance);
 				return false;
 			} 
@@ -482,29 +500,32 @@ namespace lyapunov {
 	public:
 		using variable_stepper_wrapper::variable_stepper_wrapper;
 		//'try_step' and 'adjust_step' methods are duplicated in variable_stepper_instance
-		virtual double try_step(num_type current_time, num_type current_step_size) {
-			num_type error_index = 0.0;
+		virtual void try_step(num_type current_time, num_type current_step_size) {
 			stepper.do_step(system_function,
 							current_state,
 							current_time,
 							temporary,
 							current_step_size,
 							error);
-			for(auto i=error.size()-1; i>=0; --i) {
-				error_index = fmax(error_index, abs(error[i]) /
-							  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
-			}
-			return error_index;
 		}
-		virtual void increase_step(num_type error_index) {
-			if(error_index < 0.5) 
-				step_size *= fmin(5, 0.9*pow(error_index, -1/stepper_order));
+		virtual void try_free_step(num_type current_step_size) {
+            stepper.do_step(system_function,
+                            saved_state,
+                            saved_time,
+                            temporary,
+                            current_step_size,
+                            error);
+        }
+        virtual void increase_step(num_type error_index) {
+			if(error_index < 0.5) {
+				step_size *= fmin(5, 0.9*pow(error_index, -1.0/stepper_order));
+            }
 		}
 		virtual bool decrease_step(num_type error_index, num_type original_step_size) {
 			if(error_index > 1.0) { //problems here
 				//decrease step size
 				step_size = original_step_size * fmax(0.2, 0.9 *
-							pow(error_index, -1/(error_order - 1)));
+							pow(error_index, -1.0/(error_order - 1.0)));
 				step_size = fmax(step_size, time_tolerance);
 				return false;
 			} 
@@ -516,13 +537,15 @@ namespace lyapunov {
 		}
 	};
 }
+
+BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(step_across_overloads, lyapunov::stepper_wrapper::step_across, 0, 1)
+
 //macros for exposing wrapped steppers
 //assumes 'using namespace boost::python'
 //no semicolon afterwards
 #define LYAPUNOV_EXPOSE_STEPPER(STEPPER, WRAPPER) { \
 class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
-	.def("step_back", &WRAPPER< STEPPER >::step_back) \
-	.def("step_across", &WRAPPER< STEPPER >::step_across) \
+	.def("step_across", &WRAPPER< STEPPER >::step_across, step_across_overloads(args("new_state")) ) \
 	.def("reset", &WRAPPER< STEPPER >::reset) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER >::next) \
@@ -535,8 +558,7 @@ class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
 
 #define LYAPUNOV_EXPOSE_VARIABLE_STEPPER(STEPPER, WRAPPER, ORDER, ERROR) { \
 class_< WRAPPER< STEPPER, ORDER, ERROR > >(#STEPPER, init<object, object>()) \
-	.def("step_back", &WRAPPER< STEPPER, ORDER, ERROR >::step_back) \
-	.def("step_across", &WRAPPER< STEPPER, ORDER, ERROR >::step_across) \
+	.def("step_across", &WRAPPER< STEPPER, ORDER, ERROR >::step_across, (arg("new_state")=object()) ) \
 	.def("reset", &WRAPPER< STEPPER, ORDER, ERROR >::reset) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER, ORDER, ERROR >::next) \
