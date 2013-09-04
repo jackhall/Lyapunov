@@ -25,20 +25,20 @@ import matplotlib.pyplot as plt
 
 
 class MassSpringDemo(object):
-	"""
-	Mass spring damper system.
-	k = b = m = 1.0
-	No disturbances or control.
-	"""
-	def __init__(self):
-		self.state = 0.0, (1.0, 1.0)
-		self.u = lambda : 0.0
+    """
+    Mass spring damper system.
+    k = b = m = 1.0
+    No disturbances or control.
+    """
+    def __init__(self):
+        self.state = 0.0, (1.0, 1.0)
+        self.u = lambda : 0.0
 
-	state = lyapunov.state_property(xname="_state")
+    state = lyapunov.state_property(xname="_state")
 
-	def __call__(self):
-		x, v = self._state
-		return (v, -v - x + self.u())
+    def __call__(self):
+        x, v = self._state
+        return (v, -v - x + self.u())
 
 
 sys = MassSpringDemo()
@@ -61,17 +61,17 @@ print "slope", sys()
 
 
 class SubsystemDemo(lyapunov.ParallelSystems):
-	"""A mass-spring-damper controlled by a PID."""
-	def __init__(self):
-		self.plant = MassSpringDemo()
-		self.control = lyapunov.PID(Ki=1)
-		self.reference = lyapunov.StepSignal(step_time=2.0)
-		self.control.y = lambda: self.plant.state[1]
-		self.control.r = lambda: self.reference.value
-		self.plant.u = self.control.u
-		lyapunov.ParallelSystems.__init__(self, [self.reference, 
-												 self.control, 
-												 self.plant])
+    """A mass-spring-damper controlled by a PID."""
+    def __init__(self):
+        self.plant = MassSpringDemo()
+        self.control = lyapunov.PID(Ki=1)
+        self.reference = lyapunov.StepSignal(step_time=2.0)
+        self.control.y = lambda: self.plant.state[1]
+        self.control.r = lambda: self.reference.value
+        self.plant.u = self.control.u
+        lyapunov.ParallelSystems.__init__(self, [self.reference, 
+                                                 self.control, 
+                                                 self.plant])
 
 
 sys2 = SubsystemDemo()
@@ -81,8 +81,13 @@ stepper = lyapunov.cash_karp(sys2, 3.0)
 print "\nMass-Spring-Damper w/PID control"
 print "initial state", sys2.state
 start = time.clock()
+count = 0
 for t in stepper:
-	record.log()
+    print t
+    count+=1
+    if count > 10:
+        break
+    record.log()
 print "time elapsed", time.clock() - start
 
 x_out = numpy.array(record.x)

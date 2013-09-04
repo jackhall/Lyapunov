@@ -332,6 +332,8 @@ namespace lyapunov {
 		void free_step() {
 			namespace bp = boost::python;
 			save_last();
+            auto current_time = saved_time;
+            current_state = saved_state;
 			bool step_successful = false;
 			num_type error_index, current_step_size;
 			if(step_size < (final_time - saved_time)) {
@@ -354,16 +356,16 @@ namespace lyapunov {
 			namespace bp = boost::python;
 			save_last();
 			auto current_time = saved_time; 
-			saved_state = current_state;
+            current_state = saved_state;
 			num_type current_step_size, error_index=0.0;
 			if(step_size < 0) step_size = next_time - current_time;
 			bool last_step = false;
 			while(true) {
 				current_step_size = next_time - current_time;
-				if(step_size < current_step_size) 
+				if(step_size < current_step_size) {
 					current_step_size = step_size;
 					last_step = false;
-				else last_step = true; //problem here?
+				} else last_step = true; //problem here?
 				
 				error_index = try_step(current_time, current_step_size);
 
