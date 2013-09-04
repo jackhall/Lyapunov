@@ -97,6 +97,14 @@ namespace lyapunov {
 	};
 
 	boost::python::object pass_through(const boost::python::object& obj) { return obj; }
+    double minimum(double x, double y) { 
+        if(x>y) return y;
+        else return x;
+    }
+    double maximum(double x, double y) {
+        if(x<y) return y;
+        else return x;
+    }
 	
 	//should step_across, next, and set_events be redefined for multistepper? probably
 	//use bp::arg for keyword arguments
@@ -302,7 +310,11 @@ namespace lyapunov {
               final_time_reached(false) {
 			use_times(time);
 		}
-		num_type get_step_size() const { return step_size; }
+		virtual void step_back() {
+            final_time_reached = false;
+            base_type::step_back();
+        }
+        num_type get_step_size() const { return step_size; }
 		num_type get_relative_tolerance() const { return relative_tolerance; }
 		void set_relative_tolerance(num_type new_tolerance) {
 			if(new_tolerance > 0) relative_tolerance = new_tolerance;
@@ -320,16 +332,16 @@ namespace lyapunov {
 				final_time = bp::extract<num_type>(time);
 				step_size = 0.01*(final_time - 
 							bp::extract<num_type>(system.attr("state")[0]));
-                final_time_reached = false;
 			} else base_type::use_times(time);
+            final_time_reached = false;
 		}
 		virtual void try_step(num_type current_time, num_type current_step_size) = 0;
         virtual void try_free_step(num_type current_step_size) = 0;
         double compute_error_index() {
             double error_index = 0.0;
             for(int i=error.size()-1; i>=0; --i) {
-				error_index = fmax(error_index, abs(error[i]) /
-							  (absolute_tolerance - relative_tolerance*abs(temporary[i])));
+				error_index = maximum(error_index, std::abs(error[i]) /
+							  (absolute_tolerance + relative_tolerance*std::abs(temporary[i])));
 			}
             return error_index;
         }
@@ -347,8 +359,8 @@ namespace lyapunov {
 			num_type error_index, current_step_size;
 			if(step_size < (final_time - saved_time)) {
 				while(!step_successful) {
+                    try_free_step(step_size);
 				    current_step_size = step_size;
-                    try_free_step(current_step_size);
                    	error_index = compute_error_index(); 
 					step_successful = adjust_step(error_index, step_size); 
 				}
@@ -479,15 +491,15 @@ namespace lyapunov {
         }
         virtual void increase_step(num_type error_index) {
 			if(error_index < 0.5) {
-				step_size *= fmin(5, 0.9*pow(error_index, -1.0/stepper_order));
+				step_size *= minimum(5, 0.9*pow(error_index, -1.0/stepper_order));
             }
 		}
 		virtual bool decrease_step(num_type error_index, num_type original_step_size) {
 			if(error_index > 1.0) { //problems here
 				//decrease step size
-				step_size = original_step_size * fmax(0.2, 0.9 *
+				step_size = original_step_size * maximum(0.2, 0.9 *
 							pow(error_index, -1.0/(error_order - 1.0)));
-				step_size = fmax(step_size, time_tolerance);
+				step_size = maximum(step_size, time_tolerance);
 				return false;
 			} 
 			return true;
@@ -518,15 +530,15 @@ namespace lyapunov {
         }
         virtual void increase_step(num_type error_index) {
 			if(error_index < 0.5) {
-				step_size *= fmin(5, 0.9*pow(error_index, -1.0/stepper_order));
+				step_size *= minimum(5, 0.9*pow(error_index, -1.0/stepper_order));
             }
 		}
 		virtual bool decrease_step(num_type error_index, num_type original_step_size) {
 			if(error_index > 1.0) { //problems here
 				//decrease step size
-				step_size = original_step_size * fmax(0.2, 0.9 *
+				step_size = original_step_size * maximum(0.2, 0.9 *
 							pow(error_index, -1.0/(error_order - 1.0)));
-				step_size = fmax(step_size, time_tolerance);
+				step_size = maximum(step_size, time_tolerance);
 				return false;
 			} 
 			return true;
@@ -538,14 +550,12 @@ namespace lyapunov {
 	};
 }
 
-BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(step_across_overloads, lyapunov::stepper_wrapper::step_across, 0, 1)
-
 //macros for exposing wrapped steppers
 //assumes 'using namespace boost::python'
 //no semicolon afterwards
 #define LYAPUNOV_EXPOSE_STEPPER(STEPPER, WRAPPER) { \
 class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
-	.def("step_across", &WRAPPER< STEPPER >::step_across, step_across_overloads(args("new_state")) ) \
+	.def("step_across", &WRAPPER< STEPPER >::step_across, (arg("new_state")=object()) ) \
 	.def("reset", &WRAPPER< STEPPER >::reset) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER >::next) \
