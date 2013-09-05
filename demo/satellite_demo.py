@@ -50,18 +50,17 @@ class SatelliteDemo(object):
 		_, v = self.state.x
 		return (v, self.u())
 
-	def plot(self):
-		plt.figure()
-		try:
-			xmin, xmax = min(self.x_out[:,0]), max(self.x_out[:,0])
-			ymin, ymax = min(self.x_out[:,1]), max(self.x_out[:,1])
-			x = numpy.array([xmin, xmax])
-			lam = numpy.array([-0.5*xmin, -0.5*xmax])
-			plt.plot(x, lam)
-			plt.plot(self.x_out[:,0], self.x_out[:,1])
-			plt.show()
-		except AttributeError:
-			plt.close()
+
+def plot(record):
+    plt.figure()
+    x = numpy.array(record.x)
+    xmin, xmax = min(x[:,0]), max(x[:,0])
+    ymin, ymax = min(x[:,1]), max(x[:,1])
+    x_mode = numpy.array([xmin, xmax])
+    lam = numpy.array([-0.5*xmin, -0.5*xmax])
+    plt.plot(x_mode, lam)
+    plt.plot(x[:,0], x[:,1])
+    plt.show()
 
 
 #Brute force could work well, but with a small step size...
@@ -74,32 +73,31 @@ print "\nNo Events, No Sliding - satellite control"
 print "initial state", sys3.state
 start = time.clock()
 #record = sol.simulate(t_in)
-for t in stepper:
+for t, events in stepper:
 	record.log()
 print "time elapsed", time.clock() - start
-sys3.x_out, sys3.t_out = numpy.array(record.state), numpy.array(record.time)
-sys3.plot()
+plot(record)
 
 
 #With events and sliding is more accurate, and faster than brute force.
 sys2 = SatelliteDemo()
+sys2.events = [sys2.s]
 sys2.u = lambda: -1 #replaces u_naive
 t_in = numpy.linspace(0.0, 3.0, 31)
 record = lyapunov.Recorder(sys2)
-stepper = solvers.runge_kutta4(sys2, t_in, [sys2.s], 0.0001)
+stepper = solvers.runge_kutta4(sys2, t_in)
 print "\nWith Events and Sliding - satellite control"
 start = time.clock()
 for t, events in stepper:
-	record.log()
+	record.log(events)
 	if len(events) > 0:
 		if sys2.s in events and sys2.u_margin() > 0:
 			sys2.u = sys2.u_effective
-			stepper.events = [sys2.u_margin]
+			sys2.events = [sys2.u_margin]
 		else:
 			stepper.step_through()
 			sys2.u = (lambda: 1) if sys2.u_effective() > 1 else (lambda: -1)
-			stepper.events = [sys2.s]
+			sys2.events = [sys2.s]
 print "time elapsed ", time.clock() - start
-sys2.x_out, sys2.t_out = numpy.array(record.state), numpy.array(record.time)
-sys2.plot()
+plot(record)
 

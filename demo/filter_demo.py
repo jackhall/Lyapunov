@@ -20,7 +20,6 @@
 
 import time
 import lyapunov
-import solvers
 import numpy
 import matplotlib.pyplot as plt
 
@@ -28,17 +27,21 @@ fil = lyapunov.Filter((1.0, 3.0, 3.0))
 ref = lyapunov.StepSignal()
 fil.signal = lambda : ref.value
 fil.state = 0.0, (0.0,)*3
-sys5 = lyapunov.ParallelSystems([ref, fil])
-t_in = numpy.linspace(0.0, 10.0, 100)
+sys = lyapunov.ParallelSystems([ref, fil])
+record = lyapunov.Recorder(sys)
+stepper = lyapunov.dormand_prince(sys, 10.0)
 print "\nFilter"
-print "initial state", sys5.state
+print "initial state", sys.state
 start = time.clock()
-record = lyapunov.simulate(sys5, t_in)
+for t, events in stepper:
+    record.log(events)
+    if events:
+        stepper.step_across()
+        ref.update()
 print "time elapsed", time.clock() - start
-x_out, t_out = numpy.array(record.state), numpy.array(record.time)
 plt.figure()
 try:
-	plt.plot(t_out, x_out[:,0])
+	plt.plot(record.t, numpy.array(record.x)[:,0])
 	plt.show()
 except:
 	plt.close()

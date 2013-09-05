@@ -174,21 +174,19 @@ class SMController(FBLController):
 
 
 #Choose input function
-t_in = lyapunov.Time(initial=0, step_size=0.001)
 if "step" in sys.argv:
-	t_in.final = 8.0
+	final_time = 8.0
 	reference = lyapunov.StepSignal(step_time=2.0, y_final=2.0)
 elif "squarewave" in sys.argv:
-	t_in.final = 30.0
+	final_time = 30.0
 	reference = lyapunov.SquareWave(period=10.0, y_lower=-1.0, y_upper=1.0)
 elif "chirp" in sys.argv:
-	t_in.final = 60.0
+	final_time = 60.0
 	reference = lyapunov.ChirpSignal(freq_fcn=lambda t:0.01*t)
 else:
 	print "defaulting control signal to regulation"
-	t_in.final = 8.0
-	reference = lyapunov.StepSignal(step_time=t_in.final+1)
-t_in._construct()
+	final_time = 8.0
+	reference = lyapunov.StepSignal(step_time=final_time + 1)
 
 #Construct subsystems.
 plant = Motor()
@@ -235,30 +233,35 @@ else:
 if "showu" in sys.argv:
 	#labels['control effort'] = controller.u
 	labels['u_eqivalent'] = controller._u_eq
-recorder = lyapunov.Recorder(system, labels)
+record = lyapunov.Recorder(system, labels)
 
 #Simulate
+stepper = lyapunov.fehlberg87(system, final_time)
 print "initial state:", system.state
 #stepper = solvers.Stepper(sys)
 #stepper.step(0.01)
 #print "next state:", sys.state
-print "simulating for", t_in.span, "sec with", t_in.points, "points."
+print "simulating for", final_time, "sec."
 start = time.clock()
-recorder = lyapunov.simulate(system, t_in, logger=recorder)
-print "final state:", recorder.x[-1]
+for t, events in stepper:
+    record.log(events)
+    if events:
+        stepper.step_across()
+        reference.update()
+print "final state:", record.x[-1]
 print "elapsed time =", time.clock() - start
 
 #Plot
-recorder.time_response() 
+record.time_response() 
 if "showx" in sys.argv:
 	print "plotting states..."
 	titles = ["stator current", "rotor current", "angular velocity", "angle"]
-	x = numpy.array(recorder.x)
+	x = numpy.array(record.x)
 	for i in range(4):
 		plt.figure()
-		plt.plot(recorder.t, x[:,3+i], label="plant")
+		plt.plot(record.t, x[:,3+i], label="plant")
 		if "observe" in sys.argv:
-			plt.plot(recorder.t, x[:,7+i], label="observer")
+			plt.plot(record.t, x[:,7+i], label="observer")
 		plt.legend()
 		plt.xlabel('time (s)')
 		plt.title(titles[i])
