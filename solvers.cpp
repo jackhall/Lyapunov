@@ -193,6 +193,7 @@ namespace lyapunov {
 			else state_tup = bp::make_tuple(saved_time, new_state);
 			system.attr("state") = state_tup;
 			reset();
+            update_signs();
 		}
 		num_type get_step_size() const { 
 			namespace bp = boost::python;
@@ -214,6 +215,8 @@ namespace lyapunov {
 		}
 		boost::python::object next() {
 			namespace bp = boost::python;
+            //if an event occurred, step through it
+            if(saved_information == BOUNDARY) step_across();
 			//get time for this next step
 			if( next_time_obj.is_none() ) 
 				next_time_obj = steps.attr("next")(); //may throw StopIteration
@@ -327,7 +330,8 @@ namespace lyapunov {
 		}
 		void use_times(boost::python::object time) {
 			namespace bp = boost::python;
-			if(PyNumber_Check(time.ptr())) {
+            PyObject* time_ptr = time.ptr();
+			if(!PySequence_Check(time_ptr) && PyNumber_Check(time_ptr)) {
 				steps = boost::python::object();
 				final_time = bp::extract<num_type>(time);
 				step_size = 0.01*(final_time - 
@@ -387,6 +391,10 @@ namespace lyapunov {
             current_state = saved_state;
 			num_type current_step_size, error_index=0.0;
 			if(step_size < 0) step_size = next_time - current_time;
+            if(std::abs(step_size) < std::numeric_limits<num_type>::epsilon()) {
+                step_size = -1;
+                return;
+            }
 			bool last_step = false;
 			while(true) {
 				current_step_size = next_time - current_time;
@@ -416,6 +424,7 @@ namespace lyapunov {
 		boost::python::object next() {
 			namespace bp = boost::python;
 			if(steps.is_none()) {
+                if(saved_information == BOUNDARY) step_across();
 				free_step();
 				if( events_occurred() ) {
 					auto flagged = find_root();

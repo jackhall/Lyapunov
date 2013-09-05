@@ -75,6 +75,9 @@ from solvers import *
 
 #################
 # System manipulation
+State = collections.namedtuple('State', 't, x')
+
+
 class ParallelSystems(object):
     """
     A container/manager for subsystems, itself a system.
@@ -126,9 +129,9 @@ class ParallelSystems(object):
         Concatenate and return state information from all subsystems 
         that have it.
         """
-        return self._time, tuple(
-                             chain.from_iterable(
-                               sys.state[1] for sys in self._subsystems))
+        return State(self._time, 
+                     tuple(chain.from_iterable(
+                             sys.state[1] for sys in self._subsystems)))
 
     @state.setter
     def state(self, t_x):
@@ -200,8 +203,6 @@ class ParallelEvents(object):
             for event in system.events:
                 yield event
 
-
-State = collections.namedtuple('State', 't, x')
 
 def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):
     """ 

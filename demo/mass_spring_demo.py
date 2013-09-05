@@ -65,7 +65,7 @@ class SubsystemDemo(lyapunov.ParallelSystems):
     def __init__(self):
         self.plant = MassSpringDemo()
         self.control = lyapunov.PID(Ki=1)
-        self.reference = lyapunov.StepSignal(step_time=2.0)
+        self.reference = lyapunov.StepSignal(step_time=4.0)
         self.control.y = lambda: self.plant.state[1]
         self.control.r = lambda: self.reference.value
         self.plant.u = self.control.u
@@ -76,7 +76,8 @@ class SubsystemDemo(lyapunov.ParallelSystems):
 
 sys2 = SubsystemDemo()
 record = lyapunov.Recorder(sys2)
-stepper = lyapunov.cash_karp(sys2, 3.0)
+stepper = lyapunov.adams_bashforth3(sys2, numpy.linspace(0.0, 8.0, 100))
+#stepper = lyapunov.cash_karp(sys2, 8.0)
 
 print "\nMass-Spring-Damper w/PID control"
 print "initial state", sys2.state
