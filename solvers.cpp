@@ -568,12 +568,12 @@ class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
 	.def("reset", &WRAPPER< STEPPER >::reset) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER >::next) \
-	.add_property("status", &WRAPPER< STEPPER >::get_status) \
-	.add_property("time_tolerance", &WRAPPER< STEPPER >::get_time_tolerance, &WRAPPER< STEPPER >::set_time_tolerance) \
-	.def_readwrite("tracking_events", &WRAPPER< STEPPER >::tracking_events) \
-	.add_property("step_size", &WRAPPER< STEPPER >::get_step_size) \
 	.def("use_times", &WRAPPER< STEPPER >::use_times) \
-	.add_property("system", &WRAPPER< STEPPER >::get_system, &WRAPPER< STEPPER >::set_system); }
+	.add_property("time_tolerance", &WRAPPER< STEPPER >::get_time_tolerance, &WRAPPER< STEPPER >::set_time_tolerance) \
+	.add_property("system", &WRAPPER< STEPPER >::get_system, &WRAPPER< STEPPER >::set_system) \
+	.def_readonly("tracking_events", &WRAPPER< STEPPER >::tracking_events) \
+	.def_readonly("step_size", &WRAPPER< STEPPER >::get_step_size) \
+	.def_readonly("status", &WRAPPER< STEPPER >::get_status); }
 
 #define LYAPUNOV_EXPOSE_VARIABLE_STEPPER(STEPPER, WRAPPER, ORDER, ERROR) { \
 class_< WRAPPER< STEPPER, ORDER, ERROR > >(#STEPPER, init<object, object>()) \
@@ -581,14 +581,14 @@ class_< WRAPPER< STEPPER, ORDER, ERROR > >(#STEPPER, init<object, object>()) \
 	.def("reset", &WRAPPER< STEPPER, ORDER, ERROR >::reset) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER, ORDER, ERROR >::next) \
-	.add_property("status", &WRAPPER< STEPPER, ORDER, ERROR >::get_status) \
+	.def("use_times", &WRAPPER< STEPPER, ORDER, ERROR >::use_times) \
 	.add_property("time_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_time_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_time_tolerance) \
 	.add_property("relative_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_relative_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_relative_tolerance) \
 	.add_property("absolute_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_absolute_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_absolute_tolerance) \
-	.def_readwrite("tracking_events", &WRAPPER< STEPPER, ORDER, ERROR >::tracking_events) \
-	.add_property("step_size", &WRAPPER< STEPPER, ORDER, ERROR >::get_step_size) \
-	.def("use_times", &WRAPPER< STEPPER, ORDER, ERROR >::use_times) \
-	.add_property("system", &WRAPPER< STEPPER, ORDER, ERROR >::get_system, &WRAPPER< STEPPER, ORDER, ERROR >::set_system); }
+	.add_property("system", &WRAPPER< STEPPER, ORDER, ERROR >::get_system, &WRAPPER< STEPPER, ORDER, ERROR >::set_system) \
+	.def_readonly("tracking_events", &WRAPPER< STEPPER, ORDER, ERROR >::tracking_events) \
+	.def_readonly("step_size", &WRAPPER< STEPPER, ORDER, ERROR >::get_step_size) \
+	.def_readonly("status", &WRAPPER< STEPPER, ORDER, ERROR >::get_status); }
 
 //macro to help with variable order solvers
 //no semicolon afterwards
