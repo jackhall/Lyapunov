@@ -20,7 +20,6 @@
 
 import time
 import lyapunov
-import solvers
 import numpy
 import matplotlib.pyplot as plt
 
@@ -51,7 +50,7 @@ class SatelliteDemo(object):
 		return (v, self.u())
 
 
-def plot(record):
+def plot_satellite(record):
     plt.figure()
     x = numpy.array(record.x)
     xmin, xmax = min(x[:,0]), max(x[:,0])
@@ -63,41 +62,43 @@ def plot(record):
     plt.show()
 
 
-#Brute force could work well, but with a small step size...
-sys3 = SatelliteDemo()
-#sol = lyapunov.Solver(sys3)
-t_in = numpy.linspace(0.0, 3.0, 31)
-record = lyapunov.Recorder(sys3)
-stepper = solvers.runge_kutta4(sys3, t_in)
-print "\nNo Events, No Sliding - satellite control"
-print "initial state", sys3.state
-start = time.clock()
-#record = sol.simulate(t_in)
-for t, events in stepper:
-	record.log()
-print "time elapsed", time.clock() - start
-plot(record)
+def run_satellite_demo_noevents():
+    #Brute force could work well, but with a small step size...
+    system = SatelliteDemo()
+    #sol = lyapunov.Solver(system)
+    t_in = numpy.linspace(0.0, 3.0, 31)
+    record = lyapunov.Recorder(system)
+    stepper = lyapunov.runge_kutta4(system, t_in)
+    print "\nNo Events, No Sliding - satellite control"
+    print "initial state", system.state
+    start = time.clock()
+    #record = sol.simulate(t_in)
+    for t, events in stepper:
+        record.log()
+    print "time elapsed", time.clock() - start
+    plot_satellite(record)
 
 
-#With events and sliding is more accurate, and faster than brute force.
-sys2 = SatelliteDemo()
-sys2.events = [sys2.s]
-sys2.u = lambda: -1 #replaces u_naive
-t_in = numpy.linspace(0.0, 3.0, 31)
-record = lyapunov.Recorder(sys2)
-stepper = solvers.runge_kutta4(sys2, t_in)
-print "\nWith Events and Sliding - satellite control"
-start = time.clock()
-for t, events in stepper:
-	record.log(events)
-	if len(events) > 0:
-		if sys2.s in events and sys2.u_margin() > 0:
-			sys2.u = sys2.u_effective
-			sys2.events = [sys2.u_margin]
-		else:
-			stepper.step_through()
-			sys2.u = (lambda: 1) if sys2.u_effective() > 1 else (lambda: -1)
-			sys2.events = [sys2.s]
-print "time elapsed ", time.clock() - start
-plot(record)
+def run_satellite_demo_events():
+    #With events and sliding is more accurate, and faster than brute force.
+    system = SatelliteDemo()
+    system.events = [system.s]
+    system.u = lambda: -1 #replaces u_naive
+    t_in = numpy.linspace(0.0, 3.0, 31)
+    record = lyapunov.Recorder(system)
+    stepper = lyapunov.runge_kutta4(system, t_in)
+    print "\nWith Events and Sliding - satellite control"
+    start = time.clock()
+    for t, events in stepper:
+        record.log(events)
+        if len(events) > 0:
+            if system.s in events and system.u_margin() > 0:
+                system.u = system.u_effective
+                system.events = [system.u_margin]
+            else:
+                stepper.step_through()
+                system.u = (lambda: 1) if system.u_effective() > 1 else (lambda: -1)
+                system.events = [system.s]
+    print "time elapsed ", time.clock() - start
+    plot_satellite(record)
 

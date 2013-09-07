@@ -187,12 +187,6 @@ class ParallelSystems(object):
 class ParallelEvents(object):
     """ stores references to systems, not event iterables """
     def __init__(self, sys_list):
-        def has_events(sys):
-            try:
-                sys.events
-                return True
-            except AttributeError:
-                return False
         self._subsystems = filter(has_events, sys_list)
 
     def __len__(self):
@@ -202,6 +196,17 @@ class ParallelEvents(object):
         for system in self._subsystems:
             for event in system.events:
                 yield event
+
+    def update(self):
+        
+    @static_method
+    def _has_events(sys):
+        try:
+            sys.events
+            return True
+        except AttributeError:
+            return False
+
 
 
 def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):

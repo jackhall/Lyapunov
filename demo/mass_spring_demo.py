@@ -41,23 +41,24 @@ class MassSpringDemo(object):
         return (v, -v - x + self.u())
 
 
-sys = MassSpringDemo()
-t_in = [0.1, 0.2]
-stepper = lyapunov.euler(sys, t_in)
-print "No Events - mass spring damper system"
-print "Step 0:"
-print "time", sys.state.t, "| state ", sys.state.x
-print "slope", sys()
+def print_two_steps(system = MassSpringDemo()):
+    """ System must make use of lyapunov.State. """
+    t_in = [0.1, 0.2]
+    stepper = lyapunov.euler(system, t_in)
+    print "No Events - mass spring damper systemtem"
+    print "Step 0:"
+    print "time", system.state.t, "| state ", system.state.x
+    print "slope", system()
 
-stepper.next()
-print "Step 1:"
-print "time", sys.state.t, "| state ", sys.state.x
-print "slope", sys()
+    stepper.next()
+    print "Step 1:"
+    print "time", system.state.t, "| state ", system.state.x
+    print "slope", system()
 
-stepper.next()
-print "Step 2:"
-print "time", sys.state.t, "| state ", sys.state.x
-print "slope", sys()
+    stepper.next()
+    print "Step 2:"
+    print "time", system.state.t, "| state ", system.state.x
+    print "slope", system()
 
 
 class SubsystemDemo(lyapunov.ParallelSystems):
@@ -74,24 +75,25 @@ class SubsystemDemo(lyapunov.ParallelSystems):
                                                  self.plant])
 
 
-sys2 = SubsystemDemo()
-record = lyapunov.Recorder(sys2)
-stepper = lyapunov.adams_bashforth3(sys2, numpy.linspace(0.0, 8.0, 100))
-#stepper = lyapunov.cash_karp(sys2, 8.0)
+def run_subsystem_demo():
+    system = SubsystemDemo()
+    record = lyapunov.Recorder(system)
+    stepper = lyapunov.adams_bashforth3(system, numpy.linspace(0.0, 8.0, 100))
+    #stepper = lyapunov.cash_karp(system, 8.0)
 
-print "\nMass-Spring-Damper w/PID control"
-print "initial state", sys2.state
-start = time.clock()
-count = 0
-for t, events in stepper:
-    if events:
-        stepper.step_across()
-        sys2.reference.update()
-    record.log(events)
-print "time elapsed", time.clock() - start
+    print "\nMass-Spring-Damper w/PID control"
+    print "initial state", system.state
+    start = time.clock()
+    count = 0
+    for t, events in stepper:
+        if events:
+            stepper.step_across()
+            system.reference.update()
+        record.log(events)
+    print "time elapsed", time.clock() - start
 
-x_out = numpy.array(record.x)
-plt.figure()
-plt.plot(x_out[:,0], x_out[:,1])
-plt.show()
+    x_out = numpy.array(record.x)
+    plt.figure()
+    plt.plot(x_out[:,0], x_out[:,1])
+    plt.show()
 
