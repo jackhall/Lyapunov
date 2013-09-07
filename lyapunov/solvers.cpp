@@ -161,12 +161,12 @@ namespace lyapunov {
 					    boost::python::object time)
 			: system(sys), 
 			  steps(), 
+			  next_time_obj(), 
 			  temporary( boost::python::len(sys.attr("state")[1]) ),
 			  saved_state( temporary.size() ),
 			  event_signs(),
 			  saved_time(0.0),
 			  saved_information(NOTHING),
-			  next_time_obj(), 
 			  system_function([this](const state_type& x, state_type& dx, const num_type t) { 
                   namespace bp = boost::python;
                   system.attr("state") = bp::make_tuple(t, x);
@@ -201,9 +201,8 @@ namespace lyapunov {
 		}
 		num_type get_step_size() const { 
 			namespace bp = boost::python;
-			if(saved_information == LAST) 
-				return bp::extract<num_type>(system.attr("state")[0]) - saved_time;
-			else RuntimeError("Last state not saved.");
+			if(saved_information != LAST) RuntimeError("Last state not saved.");
+			return bp::extract<num_type>(system.attr("state")[0]) - saved_time;
 		}
 		num_type get_time_tolerance() const { return time_tolerance; }
 		void set_time_tolerance(num_type new_tolerance) {
@@ -624,7 +623,6 @@ BOOST_PYTHON_MODULE(solvers) {
 	vector_from_python_tuple tup2vec;
 	//to_python_converter<std::vector<double>, vector_to_python_tuple>();
 
-	typedef stepper_wrapper::num_type num_type;
 	typedef stepper_wrapper::state_type state_type;
 
 	typedef ode::euler<state_type> euler;

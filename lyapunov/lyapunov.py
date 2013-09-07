@@ -66,12 +66,11 @@
 import sys
 import math
 import collections
-from itertools import chain, compress, imap, izip, ifilter
+import itertools as it
 import operator
 import numpy
 import inspect
 import matplotlib.pyplot as plt
-from solvers import *
 
 #################
 # System manipulation
@@ -91,7 +90,7 @@ class ParallelSystems(object):
     The order in which subsystems are stored determines the order of 
     evaluation and update. For instance, when ParallelSystems is called, 
     it will call each of its callable subsystems in order.  When 'state' is 
-    queried or set, ParallelSystems will accordingly chain together all subsystem 
+    queried or set, ParallelSystems will accordingly it.chain together all subsystem 
     state tuples or slice them.
     """
     def __init__(self, sys_list):
@@ -118,9 +117,9 @@ class ParallelSystems(object):
         """
         Call each callable subsystem in turn, and concatenate the results.
         """
-        call_iter = ifilter(callable, self._subsystems)
+        call_iter = it.ifilter(callable, self._subsystems)
         return tuple(
-                 chain.from_iterable(
+                 it.chain.from_iterable(
                    sys() for sys in call_iter))
 
     @property
@@ -130,7 +129,7 @@ class ParallelSystems(object):
         that have it.
         """
         return State(self._time, 
-                     tuple(chain.from_iterable(
+                     tuple(it.chain.from_iterable(
                              sys.state[1] for sys in self._subsystems)))
 
     @state.setter
@@ -140,7 +139,7 @@ class ParallelSystems(object):
         corresponding stated subsystems."""
         self._time, x = t_x
         a = 0
-        for dof, sys in izip(self._dof, self._subsystems):
+        for dof, sys in it.izip(self._dof, self._subsystems):
             b = a + dof 
             sys.state = self._time, x[a:b]
             a = b
@@ -187,6 +186,12 @@ class ParallelSystems(object):
 class ParallelEvents(object):
     """ stores references to systems, not event iterables """
     def __init__(self, sys_list):
+        def has_events(sys):
+            try:
+                sys.events
+                return True
+            except AttributeError:
+                return False
         self._subsystems = filter(has_events, sys_list)
 
     def __len__(self):
@@ -196,17 +201,6 @@ class ParallelEvents(object):
         for system in self._subsystems:
             for event in system.events:
                 yield event
-
-    def update(self):
-        
-    @static_method
-    def _has_events(sys):
-        try:
-            sys.events
-            return True
-        except AttributeError:
-            return False
-
 
 
 def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):
@@ -227,15 +221,21 @@ def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):
     return property(fget, fset, fdel, doc)
 
 
-def systemfunctor(sys_cls):
-    argspec = inspect.getargspec(sys_cls.__call__)
-    if len(argspec.args) == len(argspec.defaults)+1:
-        #create a new function with two arguments inserted, defaulted to None
-        #it may not be possible to do this...
-        pass
-    else:
-        #check varargs?
-        raise NotImplementedError("System not callable without arguments")
+def systemfunctor(system_class):
+    """
+    Decorator that adds defaulted time and state arguments to a system class. 
+    This should make it compatible with both Lyapunov and SciPy.
+    """
+    argspec = inspect.getargspec(system_class.__call__)
+    if len(argspec.args) != 1:
+        raise NotImplementedError("System __call__ has arity > 0")
+    original_call = system_class.__call__
+    def new_call(self, t=None, x=None):
+        if t is not None and x is not None:
+            self.state = t, x
+        return original_call(self)
+    system_class.__call__ = new_call
+    return system_class
 
 #################
 
@@ -408,105 +408,6 @@ class Filter(object):
     def __call__(self):
         return self._state[1:] + (self._xndot + self._gains[0]*self.signal(),)
 
-#deprecated
-class StopIntegration(Exception):
-    """ 
-    Exception to be thrown when the system encounters an
-    Event and needs to stop integrating.
-    """
-
-    def __iter__(self, name=""):
-        self.name = name
-
-    def __str__(self):
-        return repr(self.name)
-
-
-#deprecated
-class Time(object):
-    """
-    An iterable that acts like a time list.
-
-    The Time class supports flexible methods for defining said list. Enough 
-    of these attributes need to be defined before a given instance
-    is used as an iterable (like during a simulation):
-
-    --initial
-    --step_size
-    --final
-    --points (an int)
-    --span
-
-    Any of these can be specified as keyword arguments on initialization
-    or set as simple data attributes. No checking is performed until the
-    'construct' method is called (it's called automatically when the object
-    is used as an iterable). See 'construct' docstring for more information.
-    """
-    def __init__(self, **kwargs):
-        """
-        Accepts any of the following keyword arguments:
-
-        --initial
-        --step_size
-        --final
-        --points (an int)
-        --span
-
-        Provided arguments are assigned to the relevant data attributes.
-        """
-        self.initial = kwargs.get('initial')
-        self.step_size = kwargs.get('step_size')
-        self.final = kwargs.get('final')
-        self.points = kwargs.get('points')
-        self.span = kwargs.get('span')
-
-    def _construct(self):
-        """
-        Infer 'initial', 'step_size', and/or 'final'.
-
-        Usage: [Time].construct()
-
-        If any of the primary attributes ('initial', 'final', and
-        'step_size') are not provided, the method will attempt to infer them 
-        from secondary attributes ('span', 'points'). In case of conflict,
-        information from primary attributes is preferred, and secondary 
-        attributes will be made consistent.
-        """
-        if self.final is None and self.inital_time is None:
-            raise RuntimeError("No absolute time information given.")
-        if self.step_size is None and self.points is None:
-            raise RuntimeError("No time sparseness/density information given.")
-        if self.final is None:
-            if self.span is not None:
-                self.final = self.initial + self.span
-            elif self.points is not None and self.dt is not None:
-                self.final = (self.initial + 
-                                   self.step_size * (self.points-1))
-            else:
-                raise RuntimeError("final undefined")
-        if self.initial is None:
-            if self.span is not None:
-                self.initial = self.final - self.span
-            elif self.points is not None and self.dt is not None:
-                self.initial = (self.final - 
-                                     self.step_size * (self.points-1))
-            else:
-                raise RuntimeError("initial undefined")
-        self.span = self.final - self.initial
-        if self.step_size is None:
-            self.step_size = self.span / self.points
-        else:
-            self.points = self.span / self.step_size
-
-    def __iter__(self):
-        """
-        Use Time objects as an iterable. Note: 'construct' is called.
-        """
-        self._construct()
-        for t in numpy.linspace(self.initial, self.final, self.points):
-            yield t
-
-
 #################
 # Simulation Utilties
 class Recorder(object):
@@ -601,96 +502,4 @@ def check_NaN(system):
         raise ArithmeticError("System state is NaN!")
 
 #################
-
-#deprecated
-def simulate(system, time_sequence, **kwargs):
-    """
-    An ODE solver function for numerically integrating system objects.
-
-    Usage:
-        record = simulate(system, time_sequence, **kwargs)
-        record = simulate(system, time_sequence[, logger][, solver]
-                          [, events[, tolerance][, event_handler]])
-
-    A time iterable should provide a float for each time step the 
-    solver needs to output (not step sizes!) Note that improperly-specified 
-    time iterables may cause the solver to diverge from the solution if 
-    combined with a fixed-step solver.
-
-    After solving, the system will be reset to its state and time
-    before 'simulate' was called.
-
-    An object implements the system concept by providing 'state' (tuple 
-    of floats) and 'time' (float) data attributes or properties. Calling 
-    a system object with no arguments must return the current state 
-    derivatives (tuple of floats). If 'time' is not specified, it will be 
-    added and initialized to zero.
-    
-    State derivatives should obviously correspond one-to-one with states. 
-    Setting 'state' and 'time' attributes should uniquely 
-    map to state derivatives. This means that calling the system should not 
-    visibly mutate the object. 
-
-    The default solver is a Runge-Kutta 4 fixed step solver.
-    In the future, variable step solving may be available as well as a wider
-    range of solvers. The solver may be specified by passing in the desired
-    solver class object with the 'solver' keyword.
-
-    Event detection can be used by passing an iterable of callable objects 
-    with the 'events' keyword. Each event in the iterable should take no
-    arguments and return a float. An event occurs when the result of one or
-    more event functions crosses zero. A rootfinder will then determine the 
-    system state and time at the event to within a certain time tolerance. 
-    This tolerance can be specified with the 'tolerance' keyword.
-
-    If the events change system state or behavior, or if the set of events
-    tracked over the course of simulation will change, you may want to specify
-    an event handler with the 'event_handler' keyword. This is a callable
-    that takes an iterable of events that have occurred and returns (as an 
-    iterable) the next set of events to be tracked. The handler is only called
-    when one or more events occur. The events it returns will replace any 
-    previous events.
-    """
-    #parse arguments and initialize
-    if 'solver' in kwargs:
-        stepper_class = kwargs['solver']
-    else:
-        stepper_class = solvers.runge_kutta4
-    events_defined = 'events' in kwargs
-    if events_defined:
-        if 'tolerance' in kwargs:
-            stepper = stepper_class(system, time_sequence, kwargs['events'], 
-                                    kwargs['tolerance'])
-        else:
-            stepper = stepper_class(system, time_sequence, kwargs['events'])
-        if 'event_handler' in kwargs:
-            event_handler = kwargs['event_handler']
-        else:
-            event_handler = lambda events : events
-    else:
-        stepper = stepper_class(system, time_sequence)
-    if 'logger' in kwargs:
-        logger = kwargs['logger']
-    else:
-        logger = Recorder(system)
-
-    #simulate
-    original_state = system.state   
-    if events_defined:
-        for t, events in stepper:
-            #Check to make sure system states have not become invalid.
-            if any( map(math.isnan, system.state[1]) ):
-                raise ArithmeticError("System state is NaN!")
-            logger.log()
-            if len(events) > 0:
-                stepper.events = event_handler(events)
-    else:
-        for t in stepper:
-            #Check to make sure system states have not become invalid.
-            if any( map(math.isnan, system.state[1]) ):
-                raise ArithmeticError("System state is NaN!")
-            logger.log()
-    system.state = original_state
-    return logger
-
 
