@@ -23,6 +23,7 @@
 #include <vector>
 #include <functional>
 #include <boost/python.hpp>
+#include <boost/python/stl_iterator.hpp>
 #include <boost/numeric/odeint.hpp>
 //#include <boost/numeric/odeint/stepper/runge_kutta4.hpp>
 //#include <boost/numeric/odeint/stepper/runge_kutta_cash_karp54.hpp>
@@ -134,15 +135,14 @@ namespace lyapunov {
 		}
 		void update_signs() {
 			namespace bp = boost::python;
-			if(tracking_events) {
-				event_signs.resize( bp::len(system.attr("events")) );
-				bp::object event, iter = system.attr("events").attr("__iter__")();
-				for(auto& x : event_signs) {
-					//must not throw StopIteration early!
-					event = iter.attr("next")(); 
-					x = bp::extract<num_type>( event() );
-				}
-			}
+            event_signs.clear();
+            if(PyObject_HasAttrString(system.ptr(), "events")) {
+                for(bp::stl_input_iterator<bp::object> iter( system.attr("events") ), end;
+                      iter != end ; ++iter) {
+                    event_signs.push_back(bp::extract<num_type>( (*iter)() ));
+                }
+            }
+            if(event_signs.size() == 0) tracking_events = false;
 		}
 		void save_last() {
 			namespace bp = boost::python;
@@ -167,15 +167,14 @@ namespace lyapunov {
 			  saved_time(0.0),
 			  saved_information(NOTHING),
 			  next_time_obj(), 
-			  system_function([this](const state_type& x, state_type& dx, 
-												 const num_type t) { 
-				namespace bp = boost::python;
-				system.attr("state") = bp::make_tuple(t, x);
-				dx = bp::extract<state_type>(system()); } ),
+			  system_function([this](const state_type& x, state_type& dx, const num_type t) { 
+                  namespace bp = boost::python;
+                  system.attr("state") = bp::make_tuple(t, x);
+                  dx = bp::extract<state_type>(system()); } ),
 			  time_tolerance(0.00001), //10 microseconds
-			  tracking_events(PyObject_HasAttrString(sys.ptr(), "events")) {
+			  tracking_events(true) {
 			use_times(time);
-			update_signs(); //passes through if !tracking_events
+			update_signs(); 
 		}
 		virtual void step(num_type next_time) = 0;
 		virtual void step_back() {
@@ -184,7 +183,13 @@ namespace lyapunov {
 			system.attr("state") = bp::make_tuple(saved_time, saved_state);
 			reset();
 		}
-		virtual void reset() { saved_information = NOTHING; }
+        void reset_with_events() {
+            reset();
+            update_signs();
+        }
+		virtual void reset() { 
+            saved_information = NOTHING; 
+        }
 		void step_across(boost::python::object new_state = boost::python::object()) { 
 			namespace bp = boost::python;
 			if(saved_information != BOUNDARY) RuntimeError("No boundary to step across.");
@@ -192,8 +197,7 @@ namespace lyapunov {
 			if(new_state.is_none()) state_tup = bp::make_tuple(saved_time, saved_state);
 			else state_tup = bp::make_tuple(saved_time, new_state);
 			system.attr("state") = state_tup;
-			reset();
-            update_signs();
+			reset_with_events(); 
 		}
 		num_type get_step_size() const { 
 			namespace bp = boost::python;
@@ -203,15 +207,14 @@ namespace lyapunov {
 		}
 		num_type get_time_tolerance() const { return time_tolerance; }
 		void set_time_tolerance(num_type new_tolerance) {
-			if(new_tolerance > 0) time_tolerance = new_tolerance;
-			else ValueError("Negative values not allowed.");
+			if(new_tolerance >= 0) time_tolerance = new_tolerance;
+			else ValueError("Positive values only.");
 		}
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
 		void use_times(boost::python::object time) {
 			steps = time.attr("__iter__")(); 
 			next_time_obj = boost::python::object();
-			reset();
 		}
 		boost::python::object next() {
 			namespace bp = boost::python;
@@ -320,13 +323,13 @@ namespace lyapunov {
         num_type get_step_size() const { return step_size; }
 		num_type get_relative_tolerance() const { return relative_tolerance; }
 		void set_relative_tolerance(num_type new_tolerance) {
-			if(new_tolerance > 0) relative_tolerance = new_tolerance;
-			else ValueError("Negative values not allowed.");
+			if(new_tolerance >= 0) relative_tolerance = new_tolerance;
+			else ValueError("Positive values only.");
 		}
 		num_type get_absolute_tolerance() const { return absolute_tolerance; }
 		void set_absolute_tolerance(num_type new_tolerance) {
-			if(new_tolerance > 0) absolute_tolerance = new_tolerance;
-			else ValueError("Negative values not allowed.");
+			if(new_tolerance >= 0) absolute_tolerance = new_tolerance;
+			else ValueError("Positive values only.");
 		}
 		void use_times(boost::python::object time) {
 			namespace bp = boost::python;
@@ -334,8 +337,10 @@ namespace lyapunov {
 			if(!PySequence_Check(time_ptr) && PyNumber_Check(time_ptr)) {
 				steps = boost::python::object();
 				final_time = bp::extract<num_type>(time);
-				step_size = 0.01*(final_time - 
+                if(step_size < 0) {
+				    step_size = 0.01*(final_time - 
 							bp::extract<num_type>(system.attr("state")[0]));
+                }
 			} else base_type::use_times(time);
             final_time_reached = false;
 		}
@@ -565,7 +570,7 @@ namespace lyapunov {
 #define LYAPUNOV_EXPOSE_STEPPER(STEPPER, WRAPPER) { \
 class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
 	.def("step_across", &WRAPPER< STEPPER >::step_across, (arg("new_state")=object()) ) \
-	.def("reset", &WRAPPER< STEPPER >::reset) \
+	.def("reset", &WRAPPER< STEPPER >::reset_with_events) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER >::next) \
 	.def("use_times", &WRAPPER< STEPPER >::use_times) \
@@ -578,7 +583,7 @@ class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
 #define LYAPUNOV_EXPOSE_VARIABLE_STEPPER(STEPPER, WRAPPER, ORDER, ERROR) { \
 class_< WRAPPER< STEPPER, ORDER, ERROR > >(#STEPPER, init<object, object>()) \
 	.def("step_across", &WRAPPER< STEPPER, ORDER, ERROR >::step_across, (arg("new_state")=object()) ) \
-	.def("reset", &WRAPPER< STEPPER, ORDER, ERROR >::reset) \
+	.def("reset", &WRAPPER< STEPPER, ORDER, ERROR >::reset_with_events) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER, ORDER, ERROR >::next) \
 	.def("use_times", &WRAPPER< STEPPER, ORDER, ERROR >::use_times) \
