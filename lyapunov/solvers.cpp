@@ -337,7 +337,7 @@ namespace lyapunov {
 				steps = boost::python::object();
 				final_time = bp::extract<num_type>(time);
                 if(step_size < 0) {
-				    step_size = 0.01*(final_time - 
+				    step_size = 0.001*(final_time - 
 							bp::extract<num_type>(system.attr("state")[0]));
                 }
 			} else base_type::use_times(time);
