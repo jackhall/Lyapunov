@@ -1,48 +1,133 @@
 #!/usr/bin/env python
 """
-    Lyapunov is a toolbox for integrating dynamical systems. 
+    Lyapunov is a toolbox for integrating dynamical systems. Integration of 
+    ordinary equations is done with solvers from boost.numeric.odeint, wrapped 
+    using boost.python.
 
-    Instead of treating systems as functions, lyapunov represents systems as 
-    objects. Not only does this significantly clean up the solver interface, but 
-    it also encourages the encapsulation of subsystems. Exposed classes:
+    Instead of treating systems as functions, Lyapunov represents systems as 
+    objects. This not only significantly cleans up the solver interface, but it 
+    also gives the user more control over the simulation and encourages a cleaner 
+    coding style. There is a Tutorial, and the "demo/" directory contains several 
+    working demonstrations of the library interface.
 
-    Recorder - A way to track and later plot any system data. 
-    CompositeSystem - A container/manager for subsystems, itself a system.
-    Filter - A linear filter of arbitrary order. 
-    Time - A convenient way of creating and manipulating time iterables.
-    StepSignal - Generates a step signal.
-    SquareWave - Generates a square wave.
-    SineWave - Generates an sinusoid.
-    ChirpSignal - Generates a sinusoid with an arbitrary instantaneous frequency.
+    This reference starts with a function interview and then moves on to a 
+    detailed description of the library as a set of interface concepts.
 
-    Exposed functions:
+    **Exposed Classes and Functions**
 
-    simulate - a way to numerically integrate systems
+    Each of these stepper classes uses a different numerical solver. The low-level 
+    numerical routines are taken from boost.numeric.odeint (a widely available C++ 
+    library) and wrapped using boost.python. Documentation for steppers is general 
+    - all steppers are used similarly, but here is an overview. The first four 
+    stepper classes implement fixed_step algorithms. Note: the order of a solver 
+    is a measure of how fast numerical error accumulates in the solution.
 
-    --For a full description of Lyapunov's system concept, see lyapunov.simulate. 
+        euler - First-order solver useful mostly for demonstration purposes
+        modified_midpoint - Second-order Runge-Kutta solver - simple but inaccurate
+        runge_kutta4 - Commonly used fourth-order solver
+        adams_bashforth* - Multistep algorithms - good for expensive system calls
 
-    --lyapunov.CompositeSystem provides a subsystem manager that itself 
-      implements the system interface, allowing the user to build arbitrarily 
-      complex hierarchies of subsystems.
+    These next three include step size control. Each solver provides an 
+    approximate measure of the error accrued in each step, allowing Lyapunov to 
+    adjust the step size in response. They can also emulate fixed-step solutions 
+    without sacrificing error control, in exchange for a little speed.
 
-    --For convenient plotting state or output trajectories (in time or as a 
-      phase portrait), see lyapunov.Plotter. 
+        cash_karp - A fifth-order RK solver with fourth-order error estimation
+        dormand_prince - Another fifth-order RK method with fourth-order error 
+                 estimation - has internal state
+        fehlberg87 - An eighth-order RK solver with seventh-order error estimation
 
-    --The file 'demo/motor_demo.py' has a full demonstration of the above 
-      features. 
+    These utilities should help the user adhere to the system concept without 
+    sacrificing convenience or coding style. In particular it should be easy to 
+    recursively nest subsystems.
 
-    --Event detection is included. See lyapunov.simulate for more information.
+        ParallelSystems - A container and manager for subsystems, itself a full 
+                          system
+        ParallelEvents - A generator to chain together subsystem event iterables
+        State - A namedtuple to help with the interface to system objects: 't' 
+                for element 0 and 'x' for element 1
+        state_property - Returns a convenient property that acts like a State
+        systemfunctor - A class decorator that modifies a system for compatibility 
+                        with SciPy
 
-    --Code generation from symbolic input (from sympy) may happen at some point.
+    Lyapunov provides some commonly used subsystem classes. The signal classes 
+    have no state and are completely time-dependent. Feel free to submit pull 
+    requests if you write a subsystem you like!
 
-    Integration of ordinary equations is done with solvers from 
-    boost::numeric::odeint, wrapped using boost.python. See the makefile in the 
-    main directory for tips on compiling. A C++11 capable compiler will be needed, 
-    along with a recent copy of boost (1.53 or later). Compilation and linking 
-    will result in a file called 'solvers.so' (or whatever suffix shared 
-    libraries have on your system). Either place this file in the main directory 
-    with 'lyapunov.py', or put both in whatever system directory python looks in 
-    to import external modules.
+        Filter - A linear filter of arbitrary order
+        PID - A basic Proportional Integral Differential controller
+        StepSignal - Generates a step signal
+        SquareWave - Generates a square wave
+        SineWave - Generates a sinusoid
+        ChirpSignal - Generates a sinusoid with an arbitrary instantaneous 
+                      frequency
+
+    These utilities provide shortcuts for general use in simulations. Again, feel 
+    free to submit your own code!
+
+        Recorder - A way to track and later plot system state and arbitrary data
+        check_NaN - Function that takes a system and raises an ArithmeticError if 
+                    any states have been corrupted
+
+    **System Objects**
+
+    System objects must provide a state attribute that is a tuple (t, x) where t 
+    is the current system time and x is a tuple of the current system state values. 
+    Lyapunov uses tuples because they are immutable; if state was mutable then it 
+    could be changed without explicitly assigning it to the system, which would 
+    undermine the use of a state descriptor and potentially violate numerical 
+    assumptions of continuity. To avoid the need to access time and state by index 
+    - which would be ugly - Lyapunov provides a state_property descriptor that acts 
+    like a namedtuple.
+
+    A system must also behave like an arity-zero function. The value returned from 
+    calling the system should be a tuple of floats corresponding to state 
+    derivatives; states and derivatives should be mapped one-to-one. The 
+    derivatives should be a continuous function of only state and time. This rule 
+    may be violated when an event occurs, however.
+
+    When an event does occur, altering the system object directly is fair game. 
+    This is a bad idea during normal integration because such changes are 
+    generally discontinuous, but an event tells the stepper to expect 
+    discontinuity. For instance, you may alter the system's events attribute as 
+    you please, or change the state equations. If you wish to set a new state, 
+    use the step_across method; otherwise this particular type of change will be 
+    forgotten when solving continues. For now, do not change the number of states 
+    a system has. Later I may add support for resizing the state tuple.
+
+    Specify events through a system object's events attribute - an iterable of 
+    arity-zero functions or functors. A discrete event occurs when one or more of 
+    these event functions changes sign. As with the state derivatives, the value 
+    of an event function should be unique given system state and time. Lyapunov's 
+    bisection method does not currently require event functions to be continuous, 
+    but this may change with the addition of a more advanced rootfinder.
+
+    Many of these rules may seem overly restrictive, but they actually apply to 
+    any numerical integration algorithms you've used before. I may simply be more 
+    meticulous about including them in documentation. Lyapunov is designed with 
+    the Zen of Python in mind: "There should only be one obvious way to do it." 
+    State integration and events are orthogonal features, respectively 
+    representing continuous and discrete behavior. Using them as such will give 
+    you the best results.
+
+    Many of these rules loosen their grip where subsystems are concerned. For 
+    instance, grouping subsystems together in an object-oriented way makes little 
+    sense unless they are coupled, in which case their behavior is no longer 
+    purely a function of their state and time. This is perfectly fine so long as 
+    the supersystem - the system object directly managed by the stepper - does 
+    follow the rules. In particular, callbacks provide a useful way of passing 
+    information back and forth as long as no information outside the supersystem 
+    is used to determine behavior. Make sure your subsystems are properly 
+    encapsulated. Lyapunov provides several classes that make nesting system 
+    objects much easier. 
+
+    **Planned Features**
+
+        a noise signal for continuous randomness
+        a state machine interface for discrete state (on top of the events interface)
+        initial-value PDE solving with `numpy.ndarray` as the state array
+        symbolic system representations with sympy
+        implicit solvers
 """
 
 #Lyapunov: a library for integrating nonlinear dynamical systems
@@ -304,8 +389,24 @@ def systemfunctor(system_class):
 #################
 # Controllers
 class PID(object):
-    """ SISO """
+    """ 
+    A SISO PID controller. I wrote this class mostly to demonstrate how
+    controller states are properly handled. The reference `r` is drawn from 
+    another subsystem (maybe one of the signal objects), and the output `y` 
+    should be drawn from the plant object. Neither of these callbacks has a 
+    default value; they must be set after initialization. 
+    """
     def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
+        """
+        Create with linear gains for the proportional, integral, and 
+        derivative terms, in that order. The two callback functions `r` and 
+        `y` are left as None, so remember to set these using another object 
+        before simulating. This may seem strange, but it's natural style for 
+        Lyapunov because otherwise you run into chicken-and-egg problems with 
+        your subsystems.
+
+        Usage: controller = PID([Kp=1.0][, Ki=0.0][, Kd=0.0])
+        """
         self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
         self.r = self.y = None
         self.state = 0.0, (0.0,) #integral term
@@ -313,13 +414,24 @@ class PID(object):
     state = state_property(xname="_state")
 
     def __call__(self):
+        """
+        Since the sole state is the value of the integral term, the state
+        derivative is simply the error.
+        """
         x, _ = self.y() 
         error = self.r() - x
         return (error,)
 
     def u(self):
+        """
+        Returns the control effort for the current error, error derivative, 
+        and error integral. The integral is a controller state, and the other 
+        terms are drawn from the `y` callback. Do not call until the callbacks 
+        are set. 
+        """
         #catch Nonetype exceptions for y and r!
-        x, v = self.y() #assumes second-order, y returns output derivative
+        xi = self.y() #y returns output derivative
+        x, v = xi[0], xi[1] #output and first derivative
         error = self.r() - x
         return self.Kp*error + self.Ki*self.state.x[0] - self.Kd*v
 
@@ -329,8 +441,13 @@ class PID(object):
 # Input Signals
 class StepSignal(object):
     """
-    Generates a step signal. The value of the step signal depends on the
-    value of '[StepSignal].time'.
+    Generates a step signal. The step itself is an event that the
+    stepper will detect. When the event occurs, call `update` after
+    calling `stepper.step_across`. It's important that the StepSignal
+    instance be on the right side of the boundary. See `update` for 
+    more information.
+
+    `value` is a data attribute set to the current value of the signal.
     """
 
     def __init__(self, step_time=1.0, y_initial=0.0, y_final=1.0):
@@ -349,6 +466,10 @@ class StepSignal(object):
     state = state_property("time", "_lyapunov__x")
 
     def update(self):
+        """
+        Sets `value` according to the current time. Call after 
+        stepping through the step event boundary.
+        """
         if self.events[0]() > 0:
             self.value = self.initial
         else:
@@ -358,6 +479,13 @@ class StepSignal(object):
 class SquareWave(object):
     """
     Generates a square wave. The value depends on '[SquareWave].time'.
+    Generates a square wave. The steps themselves are events that the
+    stepper will detect. When an event occurs, call `update` after
+    calling `stepper.step_across`. It's important that the SquareWave
+    instance be on the right side of the boundary. See `update` for 
+    more information.
+
+    `value` is a data attribute set to the current value of the signal.
     """
     def __init__(self, period=1.0, y_lower=-1.0, y_upper=1.0):
         """
@@ -375,7 +503,10 @@ class SquareWave(object):
     state = state_property("time", "_lyapunov__x")
 
     def update(self):
-        """ Updates value - y_upper if event()>0, y_lower if not. """
+        """
+        Sets `value` according to the current time. Call after 
+        stepping through the step event boundary.
+        """ 
         if self.events[0]() > 0:
             self.value = self.upper
         else:
@@ -384,7 +515,7 @@ class SquareWave(object):
 
 class SineWave(object):
     """
-    Generates a sinusoid. Value depends on '[SineWave].time'.
+    Generates a sinusoid. Its value depends on the current time.
     """
     def __init__(self, frequency=1.0, mean=0.0, amplitude=1.0, phase=0.0):
         """
@@ -408,7 +539,7 @@ class SineWave(object):
 
 class ChirpSignal(object):
     """
-    Generates a sinusoid with an arbitrary instantaneous frequency.
+    Generates a sinusoid with a time-varying frequency.
     """
     def __init__(self, freq_fcn=None, mean=0.0, amplitude=2.0):
         """ 
@@ -437,16 +568,20 @@ class ChirpSignal(object):
 
 class Filter(object):
     """ 
-    Differentiates a reference signal with a linear filter. The 
-    'output' attribute refers to the complete reference signal. 
+    A linear filter of arbitrary order. It also provides derivative estimates 
+    for otherwise nondifferentiable inputs. The `output` function returns to 
+    the complete signal, including derivatives. The signal is drawn from 
+    another subsystem with the `signal` callback. Make sure to set this before 
+    using the filter.
     """
-
     def __init__(self, gains):
         """ 
-        Place poles before constructing. 'gains' is a list of
-        coefficients of the characteristic equation (normalized),
-        from lowest-highest order. Exclude the highest, since it 
-        should be equal to one anyway. 
+        Create with an iterable over the coefficients of the filter's 
+        desired characteristic equation. The coefficients should be 
+        normalized; exclude the highest-order coefficient. It is taken to be 
+        one. Order the coefficients from lowest-to-highest order. If you
+        know the poles you want, you can simply convolve them into the
+        characteristic equation. 
         """
         #This way, there's no need to handle complex numbers.
         self._num_states = len(gains)
@@ -461,10 +596,13 @@ class Filter(object):
         """ Set state and computes the only nontrivial derivative. """
         self._time, self._state = t_x
         #parenthesis for (q,d)?
-        #catch Nonetype exception?
         self._xndot = sum(-q*d for (q,d) in zip(self._state, self._gains)) 
 
     def output(self):
+        """
+        Returns the current filtered signal and all its derivatives. Meant for
+        use as a callback. 
+        """
         return self._state + (self._xndot + self._gains[0]*self.signal(),)
 
     def __call__(self):
@@ -515,7 +653,7 @@ class Recorder(object):
         stored associatively with the current state and time. 
 
         Usage: record.log()
-               record.log(events)
+               record.log(events_list)
         """
         if events:
             self.events[len(self.t)] = events
