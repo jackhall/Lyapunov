@@ -69,6 +69,7 @@ class Observer(object):
     state = lyapunov.state_property()
 
     def __call__(self):
+        #return (ydot - output_error*L)
         pass
 
 
