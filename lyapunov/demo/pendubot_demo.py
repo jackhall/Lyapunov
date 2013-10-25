@@ -7,7 +7,7 @@ from scipy.interpolate import interp1d
 from functools import partial
 import lyapunov
 
-theta1, theta2, h1, h2 = sym.symbols('theta1 theta2 h1 h2')
+theta1, theta2, h1, h2 = sym.symbols("theta1 theta2 h1 h2")
 m1, m2, J1, J2 = sym.symbols("m1 m2 J1 J2")
 l1, l2, L1 = sym.symbols("l1 l2 L1")
 b1, b2 = sym.symbols("b1 b2")
@@ -18,28 +18,17 @@ theta2dot = (h2 - (m2*L1*(L1 + l2*sym.cos(theta2)) + J2)*theta1dot) / (J2
 h1dot = m1*g*l1*sym.sin(theta1) + m2*g*(L1*sym.sin(theta1) 
         + l2*sym.sin(theta1+theta2)) - b1*theta1dot
 h2dot = m2*g*l2*sym.sin(theta1+theta2) - b2*theta2dot
-x = [theta1, theta2, h1, h2, b1, b2]
-f = [theta1dot, theta2dot, h1dot, h2dot, sym.S(0), sym.S(0)]
-h = [theta1, theta2]
+x = sym.Matrix([theta1, theta2, h1, h2, b1, b2])
+f = sym.Matrix([theta1dot, theta2dot, h1dot, h2dot, sym.S(0), sym.S(0)])
+h = sym.Matrix([theta1, theta2])
 
-def Gradient(f, x):
-    if type(f) != list:
-        return [sym.diff(f, xi) for xi in x]
-    else:
-        return [Gradient(fi, x) for fi in f]
+df = f.jacobian(x)
+dh = h.jacobian(x)
+L11, L12, L13, L14, L15, L16 = sym.symbols("L11 L12 L13 L14 L15 L16")
+L21, L22, L23, L24, L25, L26 = sym.symbols("L21 L22 L23 L24 L25 L26")
+L = sym.Matrix([[L11, L21],[L12, L22],[L13, L23],[L14, L24],[L15, L25],[L16, L26]])
 
-def LieDerivative(f, g, x):
-    if type(g) != list:
-        return sum(sym.diff(g, xi)*fi for xi, fi in zip(x, f))
-    else:
-        return [LieDerivative(f, gi, x) for gi in g]
-
-Lf = partial(LieDerivative, f, x=x)
-G = list(h)
-G.extend( Lf(h) )
-G.extend( Lf(Lf(h)) )
-dG = Gradient(G, x)
-
+char_eqn = sym.Matrix.charpoly(df - L*dh, lambda expr: sym.collect(sym.expand(expr)))
 
 class Reader(object):
     def __init__(self, filename):
