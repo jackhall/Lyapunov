@@ -21,14 +21,19 @@ h2dot = m2*g*l2*sym.sin(theta1+theta2) - b2*theta2dot
 x = sym.Matrix([theta1, theta2, h1, h2, b1, b2])
 f = sym.Matrix([theta1dot, theta2dot, h1dot, h2dot, sym.S(0), sym.S(0)])
 h = sym.Matrix([theta1, theta2])
-
 df = f.jacobian(x)
 dh = h.jacobian(x)
-L11, L12, L13, L14, L15, L16 = sym.symbols("L11 L12 L13 L14 L15 L16")
-L21, L22, L23, L24, L25, L26 = sym.symbols("L21 L22 L23 L24 L25 L26")
-L = sym.Matrix([[L11, L21],[L12, L22],[L13, L23],[L14, L24],[L15, L25],[L16, L26]])
+#L11, L12, L13, L14, L15, L16 = sym.symbols("L11 L12 L13 L14 L15 L16")
+#L = sym.Matrix([[L11, L21],[L12, 1],[L13, 1],[L14, 1],[L15, 1],[L16, 1]])
 
-char_eqn = sym.Matrix.charpoly(df - L*dh, lambda expr: sym.collect(sym.expand(expr)))
+a,b,c,d,e,i,j,k,l,m,n,p,q,r = sym.symbols("a b c d e i j k l m n p q r")
+#assume L11, L21, L13, L24, L25, L16 are set such that their corresponding terms =-1
+#L13 and L24 must be set online to -1
+A = sym.Matrix([[-1,-1,a,0,0,0],[b,c,d,e,0,0],[-1,i,j,0,k,0],[l,-1,m,n,0,p],[q,-1,0,0,0,0],[-1,r,0,0,0,0]])
+char_poly = (sym.symbols("_lambda")*sym.eye(6) - A).det()
+#the rest of L must be set online such that char_poly matches desired_char_coeff
+#desired_char_coeff = []
+#L = sym.Matrix([[-1,-1],[b, c],[-1,i],[l,-1],[q,-1],[-1,r]])
 
 class Reader(object):
     def __init__(self, filename):
