@@ -3,37 +3,10 @@
 import math
 import numpy
 import sympy as sym
+from sympy.abc import a,b,c,d,e,g,i,j,k,l,m,n,p,q,r
 from scipy.interpolate import interp1d
 from functools import partial
 import lyapunov
-
-theta1, theta2, h1, h2 = sym.symbols("theta1 theta2 h1 h2")
-m1, m2, J1, J2 = sym.symbols("m1 m2 J1 J2")
-l1, l2, L1 = sym.symbols("l1 l2 L1")
-b1, b2 = sym.symbols("b1 b2")
-g = sym.symbols("g")
-theta1dot = h1 / (m1*l1**2 + J1)
-theta2dot = (h2 - (m2*L1*(L1 + l2*sym.cos(theta2)) + J2)*theta1dot) / (J2 
-            + m2*l2*sym.cos(theta2)*(L1 + l2*sym.cos(theta2)))
-h1dot = m1*g*l1*sym.sin(theta1) + m2*g*(L1*sym.sin(theta1) 
-        + l2*sym.sin(theta1+theta2)) - b1*theta1dot
-h2dot = m2*g*l2*sym.sin(theta1+theta2) - b2*theta2dot
-x = sym.Matrix([theta1, theta2, h1, h2, b1, b2])
-f = sym.Matrix([theta1dot, theta2dot, h1dot, h2dot, sym.S(0), sym.S(0)])
-h = sym.Matrix([theta1, theta2])
-df = f.jacobian(x)
-dh = h.jacobian(x)
-#L11, L12, L13, L14, L15, L16 = sym.symbols("L11 L12 L13 L14 L15 L16")
-#L = sym.Matrix([[L11, L21],[L12, 1],[L13, 1],[L14, 1],[L15, 1],[L16, 1]])
-
-a,b,c,d,e,i,j,k,l,m,n,p,q,r = sym.symbols("a b c d e i j k l m n p q r")
-#assume L11, L21, L13, L24, L25, L16 are set such that their corresponding terms =-1
-#L13 and L24 must be set online to -1
-A = sym.Matrix([[-1,-1,a,0,0,0],[b,c,d,e,0,0],[-1,i,j,0,k,0],[l,-1,m,n,0,p],[q,-1,0,0,0,0],[-1,r,0,0,0,0]])
-char_poly = (sym.symbols("_lambda")*sym.eye(6) - A).det()
-#the rest of L must be set online such that char_poly matches desired_char_coeff
-#desired_char_coeff = []
-#L = sym.Matrix([[-1,-1],[b, c],[-1,i],[l,-1],[q,-1],[-1,r]])
 
 class Reader(object):
     def __init__(self, filename):
@@ -56,21 +29,75 @@ class Reader(object):
 
 
 class Observer(object):
-    def __init__(self):
-        self.state = 0.0, (0.0,)*6
-        self.y = None
-       
     state = lyapunov.state_property()
 
+    def __init__(self, y):
+        self.state = 0.0, (0.0,)*6
+        self.y = y #function returning actual angles
+
+        #define pendubot model symbolically
+        m1, m2, J1, J2 = sym.symbols("m1 m2 J1 J2")
+        l1, l2, L1 = sym.symbols("l1 l2 L1")
+        parameters = {m1: 1,
+                      m2: 1,
+                      J1: .1,
+                      J2: .1,
+                      l1: .2,
+                      l2: .2,
+                      L1: .3}
+        theta1, theta2, h1, h2, b1, b2 = sym.symbols("theta1 theta2 h1 h2 b1 b2")
+        theta1dot = h1 / (m1*l1**2 + J1)
+        theta2dot = (h2 - (m2*L1*(L1 + l2*sym.cos(theta2)) + J2)*theta1dot) / (J2 
+                    + m2*l2*sym.cos(theta2)*(L1 + l2*sym.cos(theta2)))
+        h1dot = m1*g*l1*sym.sin(theta1) + m2*g*(L1*sym.sin(theta1) 
+                + l2*sym.sin(theta1+theta2)) - b1*theta1dot
+        h2dot = m2*g*l2*sym.sin(theta1+theta2) - b2*theta2dot
+        self.xsym = sym.Matrix([theta1, theta2, h1, h2, b1, b2])
+        o = sym.S(0)
+        self.f = sym.Matrix([theta1dot, theta2dot, h1dot, h2dot, o, o]).subs(parameters)
+        self.df = self.f.jacobian(self.xsym)
+
+        #set poles
+        sym.Matrix([[a,sym.S(-1),j,o,o,o],
+                    [b,sys.S(-1),k,l,o,o],
+                    [c,sys.S(-1),m,o,n,o],
+                    [d,sys.S(-1),p,q,o,r],
+                    [e,sys.S(-1),o,o,o,o],
+                    [i,sys.S(-1),o,o,o,o]])
+        desired_coeff = [729, 1458, 1215, 540, 135, 18]
+        self.char_poly = (sym.symbols("_lambda")*sym.eye(6) - A).det_bareis()
+        self.char_poly = [self.char_poly.coeff("_lambda",i) - d 
+                          for i, d in enumerate(desired_coeff)]
+
     def __call__(self):
-        #return (ydot - output_error*L)
-        pass
+        #bind current values of x to df
+        xsubs = {xsym: xval for xsym, xval in zip(self.xsym, self.state.x)}
+        dfeval = sym.Matrix(self.df).subs(xsubs).evalfunc(sym.Basic.evalf)
+        #bind current values of df to charateristic polynomial
+        gradsubs = {j:dfeval[0,2], k:dfeval[1,2], l:dfeval[1,3], m:dfeval[2,2], 
+                    n:dfeval[2,4], p:dfeval[3,2], q:dfeval[3,3], r:dfeval[3,5]}
+        char_poly_desired = map(lambda term: term.subs(gradsubs), list(self.char_poly))
+        #solve for observer gains
+        col1 = sym.solve(char_poly_desired, [a,b,c,d,e,i])
+        L = [[-col1[a], 1],
+             [-col1[b], 1 - dfeval[1,1]],
+             [-col1[c] - dfeval[2,0], 1 - dfeval[2,1]],
+             [-col1[d] - dfeval[3,0], 1 - dfeval[3,1]],
+             [-col1[e], 1],
+             [-col1[i], 1]])
+
+        #bind xsubs to self.f
+        xhatdot = sym.Matrix(self.f).subs(xsubs)
+        #compute error of current output estimate given actual outputs
+        error = [y - yhat for y, yhat in zip(self.y, self.state.x[:2])]
+        return tuple(xdoti.evalf() - Lrow[0]*error[0] - Lrow[1]*error[1] 
+                     for xdoti, Lrow in zip(xhatdot, L))
 
 
 def run_pendubot_demo():
     filename = "pendubot_run1.dat"
     reader = Reader(filename)
-    observer = Observer(filename)
+    observer = Observer(reader.theta)
     pendubot = lyapunov.ParallelSystems([reader, observer])
     observer.y = reader.theta
     observer.state = 0.0, reader.theta + (0.0, 0.0) + (0.1, 0.1) 
