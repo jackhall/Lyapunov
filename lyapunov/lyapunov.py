@@ -149,7 +149,7 @@ class ParallelSystems(object):
         """
         self._time, x = t_x
         a = 0
-        if len(self._dof) != len(x):
+        if sum(self._dof) != len(x):
             raise IndexError("Length of state tuples don't match")
         for dof, sys in it.izip(self._dof, self._subsystems):
             b = a + dof 
