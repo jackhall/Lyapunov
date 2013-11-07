@@ -60,10 +60,11 @@ class Observer(object):
                         [d,sym.S(-1),p,q,o,r],
                         [e,sym.S(-1),o,o,o,o],
                         [i,sym.S(-1),o,o,o,o]])
-        desired_coeff = [729, 1458, 1215, 540, 135, 18]
-        self.char_poly = (sym.symbols("_lambda")*sym.eye(6) - A).det_bareis()
-        self.char_poly = [self.char_poly.coeff("_lambda", index) - desired 
-                          for index, desired in enumerate(desired_coeff)]
+        self.desired_coefficients = sym.Matrix(6, 1, [729, 1458, 1215, 540, 135, 18])
+        char_poly = (sym.symbols("_lambda")*sym.eye(6) - A).det_bareis()
+        char_poly = [char_poly.coeff("_lambda", index) for index in range(6)]
+        self.char_poly = sym.Matrix([[sym.diff(row, var) for var in A[:,0]] 
+                                                         for row in char_poly])
     def __call__(self):
         #bind current values of x to df
         xsubs = {xsym: xval for xsym, xval in zip(self.xsym, self.state.x)}
@@ -71,18 +72,18 @@ class Observer(object):
         #bind current values of df to charateristic polynomial
         gradsubs = {j:dfeval[0,2], k:dfeval[1,2], l:dfeval[1,3], m:dfeval[2,2], 
                     n:dfeval[2,4], p:dfeval[3,2], q:dfeval[3,3], r:dfeval[3,5]}
-        char_poly_desired = map(lambda term: term.subs(gradsubs), list(self.char_poly))
-        #solve for observer gains
-        col1 = sym.solve(char_poly_desired, [a,b,c,d,e,i])
-        if not col1:
-            #observability lost
-            pass
-        L = [[-col1[a], 1],
-             [-col1[b], 1 - dfeval[1,1]],
-             [-col1[c] - dfeval[2,0], 1 - dfeval[2,1]],
-             [-col1[d] - dfeval[3,0], 1 - dfeval[3,1]],
-             [-col1[e], 1],
-             [-col1[i], 1]]
+        char_poly = sym.Matrix(self.char_poly).subs(gradsubs)
+        import pdb; pdb.set_trace()
+        if char_poly.condition_number() < 100: #for some reason, this function doesn't work...
+            col1 = char_poly.LUsolve(self.desired_coefficients)
+            L = [[-col1[0], 1],
+                 [-col1[1], 1 - dfeval[1,1]],
+                 [-col1[2] - dfeval[2,0], 1 - dfeval[2,1]],
+                 [-col1[3] - dfeval[3,0], 1 - dfeval[3,1]],
+                 [-col1[4], 1],
+                 [-col1[5], 1]]
+        else:
+            L = [[0,0] for index in range(6)]
         #bind xsubs to self.f
         xhatdot = sym.Matrix(self.f).subs(xsubs)
         #compute error of current output estimate given actual outputs
@@ -106,6 +107,4 @@ def run_pendubot_demo():
                   
     print "b1 ~=", observer.state.x[-2]
     print "b2 ~=", observer.state.x[-1]
-    
-    record.plot()
 
