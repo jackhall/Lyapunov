@@ -283,25 +283,38 @@ def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):
     return property(fget, fset, fdel, doc)
 
 
-def systemfunctor(system_class):
+def systemfunctor(system):
     """
-    Decorator that adds defaulted time and state arguments to a system class. 
+    Decorator that adds defaulted time and state arguments to a system class
+    or wraps a system function in a system class. 
     This should make it compatible with both Lyapunov and SciPy.
 
     Like any decorator, systemfunctor may also be used as a function that 
-    takes and returns a class. If the given class does not have `__call__` 
-    defined to take no arguments, it will raise a NotImplementedError.
+    takes and returns a class for function. If the given class does not have 
+    `__call__` defined to take no arguments, it will raise a 
+    NotImplementedError.
     """
-    argspec = inspect.getargspec(system_class.__call__)
-    if len(argspec.args) != 1:
-        raise NotImplementedError("System __call__ has arity > 0")
-    original_call = system_class.__call__
-    def new_call(self, t=None, x=None):
-        if t is not None and x is not None:
-            self.state = t, x
-        return original_call(self)
-    system_class.__call__ = new_call
-    return system_class
+    if inspect.isfunction(system):
+        class system_class(object):
+            def __init__(self, *parameters):
+                self.parameters = parameters
+            state = state_property(xname="x", tname="t")
+            def __call__(self, t=None, x=None):
+                if t is not None and x is not None:
+                    self.state = t, x
+                return system(t, x, *self.parameters)
+        return system_class
+    else:
+        argspec = inspect.getargspec(system.__call__)
+        if len(argspec.args) != 1:
+            raise NotImplementedError("System __call__ has arity > 0")
+        original_call = system.__call__
+        def new_call(self, t=None, x=None):
+            if t is not None and x is not None:
+                self.state = t, x
+            return original_call(self)
+        system.__call__ = new_call
+        return system
 
 #################
 
