@@ -372,6 +372,10 @@ def systemfunctor(system_class):
     """
     Decorator that adds defaulted time and state arguments to a system class. 
     This should make it compatible with both Lyapunov and SciPy.
+
+    Like any decorator, systemfunctor may also be used as a function that 
+    takes and returns a class. If the given class does not have `__call__` 
+    defined to take no arguments, it will raise a NotImplementedError.
     """
     argspec = inspect.getargspec(system_class.__call__)
     if len(argspec.args) != 1:
@@ -638,7 +642,6 @@ class Recorder(object):
         Usage: record = Recorder(system)
                record = Recorder(system, {label_string: labeled_function,})
         """
-        #labels is a dict ... explain
         self.system = system 
         self.labels = labels 
         self.events = {}
@@ -725,7 +728,9 @@ class Recorder(object):
 def check_NaN(system):
     """ 
     Check to make sure system states are still numbers. 
-    Raises an exception otherwise.
+    Raises an ArithmeticError otherwise.
+
+    Usage: check_NaN(system)
     """
     if any( map(math.isnan, system.state[1]) ):
         raise ArithmeticError("System state is NaN!")
