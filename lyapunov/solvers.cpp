@@ -106,8 +106,8 @@ namespace lyapunov {
         if(x<y) return y;
         else return x;
     }
-	
-	//should step_across, next, and set_events be redefined for multistepper? probably
+
+    //should step_across, next, and set_events be defined for multistepper? probably
 	//use bp::arg for keyword arguments
 	class stepper_wrapper {
 	public:
@@ -122,6 +122,7 @@ namespace lyapunov {
 		num_type saved_time; 
 		stepper_state_type saved_information;
 		std::function<void(const state_type&, state_type&, num_type)> system_function;
+        bool signs_verified;
 		bool events_occurred() const {
 			namespace bp = boost::python;
 			if(tracking_events) {
@@ -136,14 +137,32 @@ namespace lyapunov {
 		void update_signs() {
 			namespace bp = boost::python;
             event_signs.clear();
+            sign_check = 1.0; //any nonzero value will do
             if(PyObject_HasAttrString(system.ptr(), "events")) {
                 for(bp::stl_input_iterator<bp::object> iter( system.attr("events") ), end;
                       iter != end ; ++iter) {
                     event_signs.push_back(bp::extract<num_type>( (*iter)() ));
+                    sign_check *= event_signs.back();
                 }
             }
+            if(sign_check != 0) signs_verified = true;
             if(event_signs.size() == 0) tracking_events = false;
+
 		}
+        void verify_signs() {
+            //ensure that all event signs are nonzero
+            //that is: make sure that event functions that evaluate to
+            //zero at the initial conditions still get detected
+            namespace bp = boost::python;
+            zero_sign_count = 0;
+            for(int i=event_signs.size()-1; i>=0; --i) {
+                if(event_signs[i] == 0.0) {
+                    event_signs[i] = bp:extract<num_type>(system.attr("events")[i]);
+                    if(event_signs[i] == 0) ++zero_sign_count;
+                }
+            }
+            if(zero_sign_count == 0) signs_verified = true;
+        }
 		void save_last() {
 			namespace bp = boost::python;
 			bp::object state_tup = system.attr("state");
@@ -172,7 +191,8 @@ namespace lyapunov {
                   system.attr("state") = bp::make_tuple(t, x);
                   dx = bp::extract<state_type>(system()); } ),
 			  time_tolerance(0.00001), //10 microseconds
-			  tracking_events(true) {
+			  tracking_events(true), 
+              signs_verified(false) {
 			use_times(time);
 			update_signs(); 
 		}
@@ -236,6 +256,7 @@ namespace lyapunov {
 				next_time_obj = bp::object();
 				return bp::make_tuple(system.attr("state")[0], bp::list());
 			}
+            if(not signs_verified) verify_signs();  //check that signs are nonzero
 		}
 		boost::python::object find_root() {
 			//implements a simple bisection rootfinder
@@ -426,6 +447,7 @@ namespace lyapunov {
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
 		boost::python::object next() {
+            // there is quite a bit of redundancy with base_type::next
 			namespace bp = boost::python;
 			if(steps.is_none()) {
                 if(saved_information == BOUNDARY) step_across();
@@ -436,6 +458,7 @@ namespace lyapunov {
 				} else {
 					return bp::make_tuple(system.attr("state")[0], bp::list());
 				}
+                if(not signs_verified) verify_signs();
 			} else {
 				return base_type::next();
 			}
