@@ -30,7 +30,8 @@
 //#include <boost/numeric/odeint/stepper/runge_kutta_fehlberg78.hpp>
 
 namespace lyapunov {
-	
+
+    //convenience functions to call when I want to throw a particular kind of error
 	void NotImplementedError() {
 		PyErr_SetString(PyExc_NotImplementedError, "Feature not provided."); 
 		boost::python::throw_error_already_set();
@@ -53,11 +54,14 @@ namespace lyapunov {
 	}
 
 	struct Interval {
+        /* A utility to handle the contracting interval of a bisection rootfinder.
+         */
 		double lower, upper;
 		double length() const { return upper - lower; }
 		double midpoint() const { return (upper + lower) / 2.0; }
 	};
 
+    //random utilites
 	struct vector_to_python_tuple {
 		vector_to_python_tuple() {
 			using namespace boost::python;
@@ -65,10 +69,11 @@ namespace lyapunov {
 		}
 
 		static PyObject* convert(const std::vector<double>& x) {
-			using namespace boost::python;
-			list new_tuple; //is there a way around this list middle stage?
-			for(auto i : x) new_tuple.append(i);
-			return incref(tuple(new_tuple).ptr()); 
+            auto new_tuple = PyTuple_New(x.size());
+            for(int i=x.size()-1; i>=0, --i) {
+                PyTuple_SetItem(new_tuple, i, PyFloat_FromDouble(x[i]));
+            }
+            return boost::python::incref(new_tuple);
 		}
 	};
 	struct vector_from_python_tuple {
@@ -110,20 +115,29 @@ namespace lyapunov {
     //should step_across, next, and set_events be defined for multistepper? probably
 	//use bp::arg for keyword arguments
 	class stepper_wrapper {
+    /* This class represents both a wrapper for boost::numeric::odeint steppers and a 
+     * state machine for a proper simulation with rootfinding. It appears to python as an
+     * iterator.
+     */
 	public:
 		typedef double num_type;
 		typedef std::vector<num_type> state_type;
 
 	protected: //makes derived code much easier to read
+        // NOTHING: no saved point
+        // LAST: the previous point is saved
+        // BOUNDARY: the point on the other side of an event boundary is saved
 		enum stepper_state_type {NOTHING, LAST, BOUNDARY};
 
 		boost::python::object system, steps, next_time_obj;
 		state_type temporary, saved_state, event_signs;
 		num_type saved_time; 
-		stepper_state_type saved_information;
+		stepper_state_type saved_information; // which point is stored: previous or boundary
 		std::function<void(const state_type&, state_type&, num_type)> system_function;
-        bool signs_verified;
+        bool signs_verified; // true if all event_signs are nonzero
 		bool events_occurred() const {
+            /* Check to see whether any event functions crossed zero since the last step.
+             */
 			namespace bp = boost::python;
 			if(tracking_events) {
 				bp::object event, iter = system.attr("events").attr("__iter__")();
@@ -135,6 +149,10 @@ namespace lyapunov {
 			return false;
 		}
 		void update_signs() {
+            /* Record the value of each event function at the current state. The only
+             * important aspect of these numbers is their sign. If any of the values 
+             * are exactly zero, try to record a value at the next step.
+             */
 			namespace bp = boost::python;
             event_signs.clear();
             sign_check = 1.0; //any nonzero value will do
@@ -150,9 +168,10 @@ namespace lyapunov {
 
 		}
         void verify_signs() {
-            //ensure that all event signs are nonzero
-            //that is: make sure that event functions that evaluate to
-            //zero at the initial conditions still get detected
+            /* Ensure that all event signs are nonzero;
+             * that is: make sure that event functions equal to
+             * zero at the initial conditions still get detected.
+             */
             namespace bp = boost::python;
             zero_sign_count = 0;
             for(int i=event_signs.size()-1; i>=0; --i) {
@@ -164,6 +183,8 @@ namespace lyapunov {
             if(zero_sign_count == 0) signs_verified = true;
         }
 		void save_last() {
+            /* Save the current point in anticipation of stepping to the next.
+             */
 			namespace bp = boost::python;
 			bp::object state_tup = system.attr("state");
 			saved_time = bp::extract<num_type>(state_tup[0]);
@@ -172,38 +193,45 @@ namespace lyapunov {
 		}
 		
 	public:
-		num_type time_tolerance;
-		bool tracking_events;
+		num_type time_tolerance; //smallest unit of time the solver/rootfinder can see
+		bool tracking_events; // true if the event list is nonempty
 
 		stepper_wrapper() = delete;
 		stepper_wrapper(boost::python::object sys, 
 					    boost::python::object time)
 			: system(sys), 
-			  steps(), 
-			  next_time_obj(), 
+			  steps(), //actually set in use_times
+			  next_time_obj(), //actually set in use_times
 			  temporary( boost::python::len(sys.attr("state")[1]) ),
 			  saved_state( temporary.size() ),
-			  event_signs(),
+			  event_signs(), //actually set in update signs
 			  saved_time(0.0),
 			  saved_information(NOTHING),
 			  system_function([this](const state_type& x, state_type& dx, const num_type t) { 
                   namespace bp = boost::python;
                   system.attr("state") = bp::make_tuple(t, x);
                   dx = bp::extract<state_type>(system()); } ),
-			  time_tolerance(0.00001), //10 microseconds
-			  tracking_events(true), 
-              signs_verified(false) {
+			  time_tolerance(0.00001), //10 microseconds ... make this relative?
+			  tracking_events(true), //actually set in update_signs
+              signs_verified(false) { //actually set in update_signs (and verify_signs)
 			use_times(time);
 			update_signs(); 
 		}
 		virtual void step(num_type next_time) = 0;
 		virtual void step_back() {
+            /* Return the stepper to the previous point, if saved. Note that there is
+             * no way to move back two steps in a row, since only one point is saved 
+             * at a time.
+             */
 			namespace bp = boost::python;
 			if(saved_information != LAST) RuntimeError("Last state not saved.");
 			system.attr("state") = bp::make_tuple(saved_time, saved_state);
 			reset();
 		}
         void reset_with_events() {
+            /* Make sure no point is saved by the solver, and recompute the sign of
+             * each event function.
+             */
             reset();
             update_signs();
         }
@@ -211,6 +239,10 @@ namespace lyapunov {
             saved_information = NOTHING; 
         }
 		void step_across(boost::python::object new_state = boost::python::object()) { 
+            /* Move the system across the event boundary identified by the rootfinder.
+             * This does not invoke the solver, since the point across the boundary is 
+             * already known. After moving, recompute event function signs.
+             */
 			namespace bp = boost::python;
 			if(saved_information != BOUNDARY) RuntimeError("No boundary to step across.");
 			bp::object state_tup;
@@ -220,6 +252,9 @@ namespace lyapunov {
 			reset_with_events(); 
 		}
 		num_type get_step_size() const { 
+            /* Compute the time difference between this point and the saved previous point.
+             * Doesn't work without a saved previous point.
+             */
 			namespace bp = boost::python;
 			if(saved_information != LAST) RuntimeError("Last state not saved.");
 			return bp::extract<num_type>(system.attr("state")[0]) - saved_time;
@@ -232,10 +267,17 @@ namespace lyapunov {
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
 		void use_times(boost::python::object time) {
+            /* Set the iterable which generates time steps.
+             */
 			steps = time.attr("__iter__")(); 
 			next_time_obj = boost::python::object();
 		}
 		boost::python::object next() {
+            /* This method makes the wrapper an iterable in python. It numerically 
+             * estimates the state at the next time step and checks to see if any
+             * event functions changed sign. If so, it calls the rootfinder to move
+             * the system right up to the event boundary without crossing. 
+             */
 			namespace bp = boost::python;
             //if an event occurred, step through it
             if(saved_information == BOUNDARY) step_across();
@@ -259,7 +301,14 @@ namespace lyapunov {
             if(not signs_verified) verify_signs();  //check that signs are nonzero
 		}
 		boost::python::object find_root() {
-			//implements a simple bisection rootfinder
+			/* Implements a simple bisection rootfinder.
+             * Moves the system to within time_tolerance of the event boundary
+             * and saves a point just across the boundary.
+             *
+             * If more than one event is detected, the rootfinder will stop at the
+             * first one it finds. If the event boundaries are within time_tolerance
+             * of each other, both get detected.
+             */
 			namespace bp = boost::python;
 
 			//initialize interval and step size goal
@@ -301,6 +350,8 @@ namespace lyapunov {
 			return flagged; 
 		}
 		boost::python::str get_status() const {
+            /* Returns what point the stepper is currently storing.
+             */
 			switch(saved_information) {
 				case NOTHING:
 					return "nothing";
@@ -314,6 +365,10 @@ namespace lyapunov {
 		}
 	};
 	class variable_stepper_wrapper : public stepper_wrapper {
+    /* As a wrapper of variable step size solvers, this class extends stepper_wrapper
+     * to (optionally) independently choose its own step size, halting at a given 
+     * final time.
+     */
 	protected:
 		typedef stepper_wrapper base_type;
 		num_type absolute_tolerance, relative_tolerance;
@@ -331,12 +386,14 @@ namespace lyapunov {
 			  temporary(saved_state.size()),
 			  current_state(saved_state.size()),
 			  error(saved_state.size()),
-	   		  step_size(-1), //default, a flag to recompute
-	   		  final_time(0.0), 
+	   		  step_size(-1),  // flagged to recompute
+	   		  final_time(0.0),  // actually set in use_times
               final_time_reached(false) {
 			use_times(time);
 		}
 		virtual void step_back() {
+            /* See step_back docstring for stepper_wrapper.
+             */
             final_time_reached = false;
             base_type::step_back();
         }
@@ -352,6 +409,8 @@ namespace lyapunov {
 			else ValueError("Positive values only.");
 		}
 		void use_times(boost::python::object time) {
+            /*
+             */
 			namespace bp = boost::python;
             PyObject* time_ptr = time.ptr();
 			if(!PySequence_Check(time_ptr) && PyNumber_Check(time_ptr)) {
@@ -367,6 +426,8 @@ namespace lyapunov {
 		virtual void try_step(num_type current_time, num_type current_step_size) = 0;
         virtual void try_free_step(num_type current_step_size) = 0;
         double compute_error_index() {
+            /*
+             */
             double error_index = 0.0;
             for(int i=error.size()-1; i>=0; --i) {
 				error_index = maximum(error_index, std::abs(error[i]) /
@@ -377,10 +438,14 @@ namespace lyapunov {
 		virtual void increase_step(num_type error_index) = 0; 		
         virtual bool decrease_step(num_type error_index, num_type original_step_size) = 0;
 		bool adjust_step(num_type error_index, num_type original_step_size) {
+            /*
+             */
 			increase_step(error_index);
 			return decrease_step(error_index, original_step_size);
 		}
 		void free_step() {
+            /*
+             */
 			namespace bp = boost::python;
             if(final_time_reached) StopIteration();
 			save_last();
@@ -410,6 +475,8 @@ namespace lyapunov {
 												  temporary);
 		}
 		virtual void step(num_type next_time) {
+            /*
+             */
 			namespace bp = boost::python;
 			save_last();
 			auto current_time = saved_time; 
@@ -447,6 +514,8 @@ namespace lyapunov {
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
 		boost::python::object next() {
+            /*
+             */
             // there is quite a bit of redundancy with base_type::next
 			namespace bp = boost::python;
 			if(steps.is_none()) {
