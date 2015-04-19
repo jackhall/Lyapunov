@@ -114,6 +114,193 @@ namespace lyapunov {
 
     //should step_across, next, and set_events be defined for multistepper? probably
 	//use bp::arg for keyword arguments
+    class stepper_iterator {
+        /* Represent the state machine aspect of a stepper. As an abstract base class, it
+         * needs to be subclassed with a particular stepper so that step and reset_stepper
+         * can be defined.
+         */
+        std::vector<double> current_state, saved_state;
+        double current_time, saved_time, time_tolerance;
+
+        std::vector<double> event_signs;
+        bool signs_verified;
+
+        enum stepper_state_type {CLEAN, LAST, BOUNDARY};
+        stepper_state_type stepper_state;
+
+    public:
+		boost::python::object system, steps;
+		std::function<void(const state_type&, state_type&, num_type)> system_function;
+
+        stepper_wrapper() = delete;
+		stepper_wrapper(boost::python::object sys, 
+					    boost::python::object time) 
+            : saved_time(0.0),
+			  saved_state( boost::python::len(sys.attr("state")[1]) ),
+			  saved_information(CLEAN),
+			  time_tolerance(0.00001) { //10 microseconds ... make this relative?
+            set_system(sys);
+            set_steps(time);
+        }
+
+        void set_system(new_system) {
+            // Tell the stepper to integrate a different system.
+            system = new_system;
+            system_function = [this](const state_type& x, state_type& dx, const num_type t) { 
+                system.attr("state") = boost::python::make_tuple(t, x);
+                dx = boost::python::extract<state_type>(system()); 
+            }
+            // need to grab new state and event information!
+        }
+        virtual void set_steps(time) {
+            /* Take user input for time data. For a fixed stepper, this means an iterable
+             * of times. For a variable stepper, it could also mean a single desired end 
+             * time. If a variable stepper is given
+             */
+			if(PyObject_HasAttrString(time.ptr(), "__iter__"))
+                steps = time.attr("__iter__")();
+            else ValueError("Provide a sequence of times at which to approximate the ODE.");
+        }
+        virtual bool error_acceptable() { return true; }
+        virtual bool goal_achieved() { return true; }
+		bool event_occurred() const {
+            /* Check to see whether any event functions crossed zero since the last step.
+             */
+			namespace bp = boost::python;
+			if(not event_signs.empty()) {
+				bp::object event, iter = system.attr("events").attr("__iter__")();
+				for(auto x : event_signs) {
+					event = iter.attr("next")();
+					if(x * bp::extract<double>( event() ) < 0) return true;
+				}
+			} 
+			return false;
+		}
+        boost::python::list find_root() {
+			/* Implements a simple bisection rootfinder.
+             * Moves the system to within time_tolerance of the event boundary
+             * and saves a point just across the boundary.
+             *
+             * If more than one event is detected, the rootfinder will stop at the
+             * first one it finds. If the event boundaries are within time_tolerance
+             * of each other, both get detected.
+             */
+			namespace bp = boost::python;
+
+			//initialize interval and step size goal
+			Interval interval = {current_time, saved_time};
+
+			//main rootfinding loop	
+            std::vector<double> lower_state = current_state;
+			while(interval.length() > time_tolerance) {
+				//step to midpoint of interval
+				step(interval.midpoint());
+
+				//check for sign changes
+				if( events_occurred() ) {
+					interval.upper = interval.midpoint();
+                    saved_time = interval.lower;
+                    saved_state = lower_state;
+                    swap_states();
+				} else {
+                    interval.lower = interval.midpoint();
+                    lower_state = current_state;
+                }
+			}
+
+			//find out which events changed sign and return them
+            swap_states();
+			bp::list flagged;
+			bp::object event, iter = system.attr("events").attr("__iter__")();
+			for(auto x : event_signs) {
+				event = iter.attr("next")();
+				if(x * bp::extract<num_type>(event()) < 0) 
+					flagged.append(event);
+			}
+
+			//save state for step_across
+            swap_states();
+			return flagged; 
+		}
+        virtual num_type next_time() {
+            // Get the time to which the solver should step next.
+            return boost::python::extract<double>( steps.attr("next")() );
+        }
+        virtual void step() = 0;
+        virtual void reset_stepper() = 0;
+		void save_current() {
+            /* Save the current point in anticipation of stepping to the next.
+             */
+			namespace bp = boost::python;
+			bp::object state_tup = system.attr("state");
+			saved_time = bp::extract<num_type>(state_tup[0]);
+			saved_state = bp::extract<state_type>(state_tup[1]);
+		}
+        void swap_states() {
+            // Move the system and the stepper to the currently saved time.
+            if(stepper_state == CLEAN)
+                RuntimeError("Internal Error: No saved state to swap.");
+            std::swap(current_state, saved_state);
+            std::swap(current_time, saved_time);
+            update_system()
+        }
+        void update_system() {
+            // Move the system to the current state and time.
+            system.attr("state") = make_tuple(current_time, current_state);
+        }
+        void step_across() {
+            // Move the system and stepper across the boundary.
+            jump_to_saved();
+            stepper_state = CLEAN;
+
+            // Make sure boost steppers aren't saving any internal state.
+            reset_stepper();
+
+            // Reset event detection.
+            signs_verified = false;
+            event_signs.clear();
+            if(PyObject_HasAttrString(system.ptr(), "events"))
+                event_signs.resize(len(system.attr("events")), 0);
+        }
+        boost::python::tuple next() {
+            if(stepper_state == BOUNDARY) 
+                step_across(); 
+            
+            do {
+                if(not signs_verified) 
+                    verify_signs():
+                
+                save_current();
+                stepper_state = LAST;
+                step(next_time());
+
+                if(events_occurred()) {
+                    swap_saved();
+                    stepper_state = BOUNDARY;
+                    auto flagged = find_root();
+				    return bp::make_tuple(system.attr("state")[0], flagged);
+                }
+            } while(not error_acceptable() or not goal_achieved());
+
+			return bp::make_tuple(system.attr("state")[0], boost::python::list());
+        }
+        void verify_signs() {
+            /* Ensure that all event signs are nonzero;
+             * that is: make sure that event functions equal to
+             * zero at the initial conditions still get detected.
+             */
+            namespace bp = boost::python;
+            int zero_sign_count = 0;
+            for(int i=0; i<event_signs.size(); ++i) {
+                if(event_signs[i] == 0.0) {
+                    event_signs[i] = bp:extract<num_type>(system.attr("events")[i]);
+                    if(event_signs[i] == 0) ++zero_sign_count;
+                }
+            }
+            if(zero_sign_count == 0) 
+                signs_verified = true;
+        }
+    };
 	class stepper_wrapper {
     /* This class represents both a wrapper for boost::numeric::odeint steppers and a 
      * state machine for a proper simulation with rootfinding. It appears to python as an
