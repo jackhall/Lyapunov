@@ -130,7 +130,8 @@ namespace lyapunov {
 
     public:
 		boost::python::object system, steps;
-		std::function<void(const state_type&, state_type&, num_type)> system_function;
+        typedef std::vector<double> state_type;
+		std::function<void(const state_type&, state_type&, double)> system_function;
 
         stepper_wrapper() = delete;
 		stepper_wrapper(boost::python::object sys, 
@@ -222,12 +223,12 @@ namespace lyapunov {
             swap_states();
 			return flagged; 
 		}
-        virtual num_type next_time() {
+        virtual double next_time() {
             // Get the time to which the solver should step next.
             return boost::python::extract<double>( steps.attr("next")() );
         }
-        virtual void step() = 0;
-        virtual void reset_stepper() = 0;
+        virtual void step(double next_time) = 0;
+        virtual void reset_stepper() {}
 		void save_current() {
             /* Save the current point in anticipation of stepping to the next.
              */
@@ -299,6 +300,63 @@ namespace lyapunov {
             }
             if(zero_sign_count == 0) 
                 signs_verified = true;
+        }
+    };
+    class variable_stepper_iterator : public stepper_iterator {
+		num_type absolute_tolerance, relative_tolerance;
+		std::vector<double> error;
+		double step_size, desired_time, final_time;
+        bool free_iteration;
+
+        double get_error_index() {
+            double error_index = 0.0;
+            for(int i=error.size()-1; i>=0; --i) {
+                //what did temporary mean?
+				error_index = maximum(error_index, std::abs(error[i]) /
+							  (absolute_tolerance + relative_tolerance*std::abs(temporary[i])));
+			}
+            return error_index;
+        }
+
+    protected:
+        virtual double get_stepper_order() = 0;
+        virtual double get_error_order() = 0;
+
+    public:
+        virtual bool error_acceptable() {
+            /* Computes an error index and checks that it's within bounds. If the error
+             * is too large, update the step size, back up, and return false. If it's too small,
+             * update the step size and return true. 
+             */
+            double error_index = get_error_index();
+			if(error_index < 0.5)  // possibly increase step size
+				step_size *= minimum(5, 0.9*pow(error_index, -1.0/get_stepper_order()));
+            else if(error_index > 1.0) {  // possibly decrease step size
+				step_size = step_size * maximum(0.2, 0.9 * pow(error_index, 
+                    -1.0/(get_error_order() - 1.0)));
+				step_size = maximum(step_size, time_tolerance);
+
+                // revert to saved step
+                return false;
+            }
+			return true;
+        }
+        virtual bool goal_achieved() {
+            /* If no time iterable is set, always return true. If one is set,
+             * return true only if the stepper has reached the current next step, and
+             * assign a new next step. 
+             */
+            if(free_iteration) 
+                return true;
+            else if(current_time >= desired_time) {
+                desired_time = stepper_iterator::next_time();
+                return true;
+            } else return false;
+        }
+        virtual double next_time() {
+            /*
+             */
+            return minimum(step_size, desired_time);
         }
     };
 	class stepper_wrapper {
