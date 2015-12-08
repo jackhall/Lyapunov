@@ -6,7 +6,7 @@ from distutils.core import setup, Extension
 #make sure the boost install includes boost.python and boost.numeric.odeint
 
 setup(name="lyapunov",
-      version="3.0.1",
+      version="3.0.3",
       description="a library for integrating hybrid ODEs",
       author="Jack Hall",
       author_email="jackwhall7@gmail.com",

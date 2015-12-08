@@ -25,9 +25,6 @@
 #include <boost/python.hpp>
 #include <boost/python/stl_iterator.hpp>
 #include <boost/numeric/odeint.hpp>
-//#include <boost/numeric/odeint/stepper/runge_kutta4.hpp>
-//#include <boost/numeric/odeint/stepper/runge_kutta_cash_karp54.hpp>
-//#include <boost/numeric/odeint/stepper/runge_kutta_fehlberg78.hpp>
 
 namespace lyapunov {
 
@@ -70,7 +67,7 @@ namespace lyapunov {
 
 		static PyObject* convert(const std::vector<double>& x) {
             auto new_tuple = PyTuple_New(x.size());
-            for(int i=x.size()-1; i>=0, --i) {
+            for(int i=x.size()-1; i>=0; --i) {
                 PyTuple_SetItem(new_tuple, i, PyFloat_FromDouble(x[i]));
             }
             return boost::python::incref(new_tuple);
@@ -118,6 +115,14 @@ namespace lyapunov {
     /* This class represents both a wrapper for boost::numeric::odeint steppers and a 
      * state machine for a proper simulation with rootfinding. It appears to python as an
      * iterator.
+     *
+     * The state machine always maintains a second system state. During normal solving,
+     * this means that the stepper can always undo a step. When an event occurs the
+     * stepper already has a bounded interval. The rootfinder then narrows this
+     * interval until it's no wider than time_tolerance. The current state is considered
+     * to be the one just before the event occurs. The saved state is just after. 
+     * Calling sets the current state to the saved state (or to whatever the user 
+     * wants).
      */
 	public:
 		typedef double num_type;
@@ -155,7 +160,7 @@ namespace lyapunov {
              */
 			namespace bp = boost::python;
             event_signs.clear();
-            sign_check = 1.0; //any nonzero value will do
+            auto sign_check = 1.0; //any nonzero value will do
             if(PyObject_HasAttrString(system.ptr(), "events")) {
                 for(bp::stl_input_iterator<bp::object> iter( system.attr("events") ), end;
                       iter != end ; ++iter) {
@@ -173,10 +178,10 @@ namespace lyapunov {
              * zero at the initial conditions still get detected.
              */
             namespace bp = boost::python;
-            zero_sign_count = 0;
+            unsigned int zero_sign_count = 0;
             for(int i=event_signs.size()-1; i>=0; --i) {
                 if(event_signs[i] == 0.0) {
-                    event_signs[i] = bp:extract<num_type>(system.attr("events")[i]);
+                    event_signs[i] = bp::extract<num_type>(system.attr("events")[i]);
                     if(event_signs[i] == 0) ++zero_sign_count;
                 }
             }
@@ -211,9 +216,9 @@ namespace lyapunov {
                   namespace bp = boost::python;
                   system.attr("state") = bp::make_tuple(t, x);
                   dx = bp::extract<state_type>(system()); } ),
+              signs_verified(false), //actually set in update_signs (and verify_signs)
 			  time_tolerance(0.00001), //10 microseconds ... make this relative?
-			  tracking_events(true), //actually set in update_signs
-              signs_verified(false) { //actually set in update_signs (and verify_signs)
+			  tracking_events(true) { //actually set in update_signs
 			use_times(time);
 			update_signs(); 
 		}
@@ -289,7 +294,7 @@ namespace lyapunov {
 			step(next_time);
 			//check for event function sign changes, if any
 			if( events_occurred() ) {
-				auto flagged = find_root();
+				auto flagged = find_root(); //the active event functions
 				//next_time_obj is not reset!
 				return bp::make_tuple(system.attr("state")[0], flagged);
 			} else {
@@ -372,7 +377,7 @@ namespace lyapunov {
 	protected:
 		typedef stepper_wrapper base_type;
 		num_type absolute_tolerance, relative_tolerance;
-		state_type temporary, current_state, error;
+		state_type temporary, current_state, error; // temporary needs explanation
 		num_type step_size, final_time;
         bool final_time_reached;
 
@@ -409,7 +414,11 @@ namespace lyapunov {
 			else ValueError("Positive values only.");
 		}
 		void use_times(boost::python::object time) {
-            /*
+            /* For variable_steppers, simulation time can be specified either as
+             * a list (as with simple_steppers) or a float. List calls are simply
+             * delegated to the stepper_wrapper version. Float calls give the stepper
+             * a 'goal' time at which they'll stop simulating, and otherwise let it
+             * choose step sizes freely. 
              */
 			namespace bp = boost::python;
             PyObject* time_ptr = time.ptr();
@@ -426,7 +435,7 @@ namespace lyapunov {
 		virtual void try_step(num_type current_time, num_type current_step_size) = 0;
         virtual void try_free_step(num_type current_step_size) = 0;
         double compute_error_index() {
-            /*
+            /* 
              */
             double error_index = 0.0;
             for(int i=error.size()-1; i>=0; --i) {
@@ -515,8 +524,10 @@ namespace lyapunov {
 		}
 		boost::python::object next() {
             /*
+             * There is quite a bit of redundancy with base_type::next, but
+             * the tasks common to both are interspersed with tasks that are
+             * not.
              */
-            // there is quite a bit of redundancy with base_type::next
 			namespace bp = boost::python;
 			if(steps.is_none()) {
                 if(saved_information == BOUNDARY) step_across();
@@ -535,6 +546,10 @@ namespace lyapunov {
 	};	
 	template<typename stepper_type>
 	class simple_stepper_instance : public stepper_wrapper {
+        /* For basic solvers that:
+         *  - do not vary their own step size 
+         *  - do not make use of prior state information
+         */
 		stepper_type stepper;
 
 	public:
@@ -551,22 +566,16 @@ namespace lyapunov {
 		}
 	};
 	template<typename stepper_type>
-	class simple_multistepper_instance : public stepper_wrapper {
+	class simple_multistepper_instance : public simple_stepper_instance<stepper_type> {
+        /* For solvers that:
+         *  - do not vary their own step size 
+         *  - make use of prior state information
+         */
 		stepper_type stepper;
+        typedef simple_stepper_instance<stepper_type> simple_stepper_type;
 	
 	public:
-		using stepper_wrapper::stepper_wrapper;
-		//'step' method is duplicated in simple_stepper_instance
-		void step(num_type next_time) {
-			save_last();
-			namespace bp = boost::python;
-			stepper.do_step(system_function, 
-							saved_state, 
-							saved_time, 
-							temporary, 
-							next_time - saved_time); //(sys, xin, tin, xout, h)
-			system.attr("state") = bp::make_tuple(next_time, temporary);
-		}
+		using simple_stepper_type::simple_stepper_type;
 		virtual void reset() {
 			stepper.reset();
 			stepper_wrapper::reset();
@@ -574,6 +583,10 @@ namespace lyapunov {
 	};
 	template<typename stepper_type, unsigned int stepper_order, unsigned int error_order>
 	class variable_stepper_instance : public variable_stepper_wrapper {
+        /* For solvers that:
+         *  - vary their own step size 
+         *  - do not make use of prior state information
+         */
 		stepper_type stepper;
 
 	public:
@@ -611,43 +624,18 @@ namespace lyapunov {
 		}
 	};
 	template<typename stepper_type, unsigned int stepper_order, unsigned int error_order>
-	class variable_multistepper_instance : public variable_stepper_wrapper {
+	class variable_multistepper_instance : 
+      public variable_stepper_instance<stepper_type, stepper_order, error_order> {
+        /* For solvers that both:
+         *  - vary their own step size 
+         *  - make use of prior state information
+         */
 		stepper_type stepper;
+        typedef variable_stepper_instance<stepper_type, stepper_order, error_order> 
+          variable_stepper_type;
 
 	public:
-		using variable_stepper_wrapper::variable_stepper_wrapper;
-		//'try_step' and 'adjust_step' methods are duplicated in variable_stepper_instance
-		virtual void try_step(num_type current_time, num_type current_step_size) {
-			stepper.do_step(system_function,
-							current_state,
-							current_time,
-							temporary,
-							current_step_size,
-							error);
-		}
-		virtual void try_free_step(num_type current_step_size) {
-            stepper.do_step(system_function,
-                            saved_state,
-                            saved_time,
-                            temporary,
-                            current_step_size,
-                            error);
-        }
-        virtual void increase_step(num_type error_index) {
-			if(error_index < 0.5) {
-				step_size *= minimum(5, 0.9*pow(error_index, -1.0/stepper_order));
-            }
-		}
-		virtual bool decrease_step(num_type error_index, num_type original_step_size) {
-			if(error_index > 1.0) { //problems here
-				//decrease step size
-				step_size = original_step_size * maximum(0.2, 0.9 *
-							pow(error_index, -1.0/(error_order - 1.0)));
-				step_size = maximum(step_size, time_tolerance);
-				return false;
-			} 
-			return true;
-		}
+		using variable_stepper_type::variable_stepper_type;
 		virtual void reset() {
 			stepper.reset();
 			variable_stepper_wrapper::reset();
@@ -733,8 +721,6 @@ BOOST_PYTHON_MODULE(solvers) {
 	LYAPUNOV_EXPOSE_VARIABLE_STEPPER(dormand_prince, variable_multistepper_instance, 5, 4)
 
 	LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth)
-	//ode::adams_moulton has a weird extra argument for do_step (a buffer?)
-	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_moulton)
 	//ode::adams_bashforth_moulton lacks a reset method for some reason (a bug?)
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth_moulton)
 	
