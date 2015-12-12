@@ -128,14 +128,15 @@ namespace lyapunov {
 		typedef double num_type;
 		typedef std::vector<num_type> state_type;
 
-	protected: //makes derived code much easier to read
+	protected: 
         // NOTHING: no saved point
         // LAST: the previous point is saved
         // BOUNDARY: the point on the other side of an event boundary is saved
 		enum stepper_state_type {NOTHING, LAST, BOUNDARY};
 
 		boost::python::object system, steps, next_time_obj;
-		state_type temporary, saved_state, event_signs;
+        state_type temporary; // stores new states after stepping but before event checking
+		state_type saved_state, event_signs; 
 		num_type saved_time; 
 		stepper_state_type saved_information; // which point is stored: previous or boundary
 		std::function<void(const state_type&, state_type&, num_type)> system_function;
@@ -198,27 +199,27 @@ namespace lyapunov {
 		}
 		
 	public:
-		num_type time_tolerance; //smallest unit of time the solver/rootfinder can see
+		num_type time_tolerance; // smallest unit of time the solver/rootfinder can see
 		bool tracking_events; // true if the event list is nonempty
 
 		stepper_wrapper() = delete;
 		stepper_wrapper(boost::python::object sys, 
 					    boost::python::object time)
 			: system(sys), 
-			  steps(), //actually set in use_times
-			  next_time_obj(), //actually set in use_times
+			  steps(), // actually set in use_times
+			  next_time_obj(), // actually set in use_times
 			  temporary( boost::python::len(sys.attr("state")[1]) ),
 			  saved_state( temporary.size() ),
-			  event_signs(), //actually set in update signs
+			  event_signs(), // actually set in update signs
 			  saved_time(0.0),
 			  saved_information(NOTHING),
 			  system_function([this](const state_type& x, state_type& dx, const num_type t) { 
                   namespace bp = boost::python;
                   system.attr("state") = bp::make_tuple(t, x);
                   dx = bp::extract<state_type>(system()); } ),
-              signs_verified(false), //actually set in update_signs (and verify_signs)
-			  time_tolerance(0.00001), //10 microseconds ... make this relative?
-			  tracking_events(true) { //actually set in update_signs
+              signs_verified(false), // actually set in update_signs (and verify_signs)
+			  time_tolerance(0.00001), // 10 microseconds ... make this relative?
+			  tracking_events(true) { // actually set in update_signs
 			use_times(time);
 			update_signs(); 
 		}
@@ -377,7 +378,7 @@ namespace lyapunov {
 	protected:
 		typedef stepper_wrapper base_type;
 		num_type absolute_tolerance, relative_tolerance;
-		state_type temporary, current_state, error; // temporary needs explanation
+		state_type current_state, error; 
 		num_type step_size, final_time;
         bool final_time_reached;
 
@@ -388,7 +389,6 @@ namespace lyapunov {
 			: base_type(sys, boost::python::list()), 
 			  absolute_tolerance(0.000001),
 			  relative_tolerance(0.001),
-			  temporary(saved_state.size()),
 			  current_state(saved_state.size()),
 			  error(saved_state.size()),
 	   		  step_size(-1),  // flagged to recompute
@@ -435,7 +435,9 @@ namespace lyapunov {
 		virtual void try_step(num_type current_time, num_type current_step_size) = 0;
         virtual void try_free_step(num_type current_step_size) = 0;
         double compute_error_index() {
-            /* 
+            /* Error index is a metric for deciding what step_size should be. An index > 1.0
+             * indicates that error is too large and the step_size should diminish. Index < 0.5
+             * means that the step size is more precise than it needs to be and may increase.
              */
             double error_index = 0.0;
             for(int i=error.size()-1; i>=0; --i) {
@@ -446,14 +448,8 @@ namespace lyapunov {
         }
 		virtual void increase_step(num_type error_index) = 0; 		
         virtual bool decrease_step(num_type error_index, num_type original_step_size) = 0;
-		bool adjust_step(num_type error_index, num_type original_step_size) {
-            /*
-             */
-			increase_step(error_index);
-			return decrease_step(error_index, original_step_size);
-		}
 		void free_step() {
-            /*
+            /* Looks like some code from step is duplicated.
              */
 			namespace bp = boost::python;
             if(final_time_reached) StopIteration();
@@ -465,7 +461,8 @@ namespace lyapunov {
                     try_free_step(step_size);
 				    current_step_size = step_size;
                    	error_index = compute_error_index(); 
-					step_successful = adjust_step(error_index, step_size); 
+                    increase_step(error_index);
+					step_successful = decrease_step(error_index, step_size); 
 				}
 			} else {
 				current_step_size = final_time - saved_time;
@@ -484,39 +481,54 @@ namespace lyapunov {
 												  temporary);
 		}
 		virtual void step(num_type next_time) {
-            /*
+            /* Takes however many error-controlled steps are needed to reach
+             * next_time from current_time. None of the intermediate steps are
+             * returned and the stepper acts as though it only took one step, 
+             * but error is guaranteed to remain within bounds.
              */
 			namespace bp = boost::python;
 			save_last();
 			auto current_time = saved_time; 
-            current_state = saved_state;
+            current_state = saved_state;  // for intermediate steps
 			num_type current_step_size, error_index=0.0;
+
+            // Make sure that we are integrating forward.
 			if(step_size < 0) step_size = next_time - current_time;
             if(std::abs(step_size) < std::numeric_limits<num_type>::epsilon()) {
-                step_size = -1;
+                step_size = -1;  // a more obviously invalid step size
                 return;
             }
+
 			bool last_step = false;
 			while(true) {
+                // Would the next step hypothetically get us past our goal, assuming
+                // that error stays within tolerance? 
+                // If so, adjust step size to precisely reach our goal.
+                // If not, use the solver's step_size
 				current_step_size = next_time - current_time;
-				if(step_size < current_step_size) {
+				if(step_size < current_step_size) { 
 					current_step_size = step_size;
 					last_step = false;
-				} else last_step = true; //problem here?
-			    
+				} else last_step = true; 
+			   
+                // Take step, check error. Next state will be stored in temporary.
                 try_step(current_time, current_step_size);
                	error_index = compute_error_index();
 
+                // Adjust step size if necessary.
 				if(error_index > 1.0) {
-					//calculate smaller step size
+					// Calculate smaller step_size and try again.
 					decrease_step(error_index, current_step_size);
 					continue;
 				} else if(last_step) {
+                    // The last step was successful!
 					break;
 				} else if(error_index < 0.5) {
-					//calculate larger step size
+					// Increase step_size if current_step_size came from the solver.
 					increase_step(error_index);
 				}
+
+                // The step was successful, but we aren't done yet. 
 				current_time += current_step_size;
 				std::swap(current_state, temporary);
 			}
@@ -527,17 +539,22 @@ namespace lyapunov {
              * There is quite a bit of redundancy with base_type::next, but
              * the tasks common to both are interspersed with tasks that are
              * not.
+             *
+             * It's possible I could factor this code a little better by 
+             * tying find_root more strongly with calls to step.
              */
 			namespace bp = boost::python;
-			if(steps.is_none()) {
+			if(steps.is_none()) {  // if given a float instead of a list for time
                 if(saved_information == BOUNDARY) step_across();
-				free_step();
+				free_step(); // simple step, no goal
 				if( events_occurred() ) {
 					auto flagged = find_root();
 					return bp::make_tuple(system.attr("state")[0], flagged);
 				} else {
+                    // unlike base_type::next, no need to reset next_time_obj
 					return bp::make_tuple(system.attr("state")[0], bp::list());
 				}
+                // Check that event signs are nonzero.
                 if(not signs_verified) verify_signs();
 			} else {
 				return base_type::next();
@@ -597,7 +614,7 @@ namespace lyapunov {
 							current_time,
 							temporary,
 							current_step_size,
-							error);
+							error); // (sys, xin, tin, xout, h, err)
 		}
 		virtual void try_free_step(num_type current_step_size) {
             stepper.do_step(system_function,
@@ -605,7 +622,7 @@ namespace lyapunov {
                             saved_time,
                             temporary,
                             current_step_size,
-                            error);
+                            error); // (sys, xin, tin, xout, h, err)
         }
         virtual void increase_step(num_type error_index) {
 			if(error_index < 0.5) {
