@@ -135,7 +135,7 @@ namespace lyapunov {
 					    boost::python::object time) 
             : saved_time(0.0),
 			  saved_state( boost::python::len(sys.attr("state")[1]) ),
-			  saved_information(CLEAN),
+			  stepper_state(CLEAN),
 			  time_tolerance(0.00001) { //10 microseconds ... make this relative?
             set_system(sys);
             set_steps(time);
@@ -233,9 +233,11 @@ namespace lyapunov {
 			bp::object state_tup = system.attr("state");
 			saved_time = bp::extract<num_type>(state_tup[0]);
 			saved_state = bp::extract<state_type>(state_tup[1]);
+            stepper_state = LAST;
 		}
         void swap_states() {
             // Move the system and the stepper to the currently saved time.
+            // Only called in the rootfinder, so stepper state == BOUNDARY.
             if(stepper_state == CLEAN)
                 RuntimeError("Internal Error: No saved state to swap.");
             std::swap(current_state, saved_state);
@@ -248,7 +250,7 @@ namespace lyapunov {
         }
         void step_across() {
             // Move the system and stepper across the boundary.
-            jump_to_saved();
+            jump_to_saved(); // NOT IMPLEMENTED
             stepper_state = CLEAN;
 
             // Make sure boost steppers aren't saving any internal state.
@@ -308,7 +310,7 @@ namespace lyapunov {
         double get_error_index() {
             double error_index = 0.0;
             for(int i=error.size()-1; i>=0; --i) {
-                //what did temporary mean?
+                // Temporary was the provisional next state.
 				error_index = maximum(error_index, std::abs(error[i]) /
 							  (absolute_tolerance + relative_tolerance*std::abs(temporary[i])));
 			}
