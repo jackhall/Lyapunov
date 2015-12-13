@@ -116,18 +116,20 @@ namespace lyapunov {
          * needs to be subclassed with a particular stepper so that step and reset_stepper
          * can be defined.
          */
+    public:
+        typedef std::vector<double> state_type;
+    
     protected:
-        std::vector<double> current_state, saved_state;
+        state_type current_state, saved_state;
         double desired_time, current_time, saved_time, time_tolerance;
 
-        std::vector<double> event_signs;
+        state_type event_signs;
         bool signs_verified;  // true if all event_signs are nonzero
 
         enum stepper_state_type {CLEAN, LAST, BOUNDARY};
         stepper_state_type stepper_state;
 
 		boost::python::object system, steps;
-        typedef std::vector<double> state_type;
 		std::function<void(const state_type&, state_type&, double)> system_function;
 
     public:
@@ -369,7 +371,7 @@ namespace lyapunov {
     class variable_stepper_iterator : public stepper_iterator {
     protected:
 		double absolute_tolerance, relative_tolerance;
-		std::vector<double> error;
+		state_type error;
 		double step_size, final_time;
         bool free_iteration;
 
@@ -382,11 +384,12 @@ namespace lyapunov {
 			}
             return error_index;
         }
-
-        virtual double get_stepper_order() = 0;
-        virtual double get_error_order() = 0;
+        virtual unsigned int get_stepper_order() const = 0;
+        virtual unsigned int get_error_order() const = 0;
 
     public:
+        using stepper_iterator::stepper_iterator;
+
 		virtual void use_times(boost::python::object time) {
             /* For variable_steppers, simulation time can be specified either as
              * a list (as with simple_steppers) or a float. List calls are simply
@@ -480,7 +483,7 @@ namespace lyapunov {
          *  - make use of prior state information
          */
 		using simple_stepper<stepper_type>::simple_stepper;
-		virtual void reset_stepper() { stepper.reset(); }
+		virtual void reset_stepper() { simple_stepper<stepper_type>::stepper.reset(); }
 	};
 	template<typename stepper_type, unsigned int stepper_order, unsigned int error_order>
 	struct variable_stepper : public variable_stepper_iterator {
@@ -514,9 +517,8 @@ namespace lyapunov {
         typedef variable_stepper<stepper_type, stepper_order, error_order> 
                 variable_stepper_type;
 
-	public:
 		using variable_stepper_type::variable_stepper;
-		virtual void reset() { stepper.reset(); }
+		virtual void reset() { variable_stepper_type::stepper.reset(); }
 	};
 }
 
