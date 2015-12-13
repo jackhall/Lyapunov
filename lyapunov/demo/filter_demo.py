@@ -23,6 +23,7 @@ import lyapunov
 import numpy
 import matplotlib.pyplot as plt
 
+
 def run_filter_demo():
     fil = lyapunov.Filter((1.0, 3.0, 3.0))
     ref = lyapunov.StepSignal()
@@ -46,4 +47,8 @@ def run_filter_demo():
         plt.show()
     except:
         plt.close()
+
+
+if __name__ == "__main__":
+    run_filter_demo()
 

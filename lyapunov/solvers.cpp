@@ -29,77 +29,77 @@
 namespace lyapunov {
 
     //convenience functions to call when I want to throw a particular kind of error
-	void NotImplementedError() {
-		PyErr_SetString(PyExc_NotImplementedError, "Feature not provided."); 
-		boost::python::throw_error_already_set();
-	}
-	void LengthError() { 
-		PyErr_SetString(PyExc_IndexError, "List lengths don't match."); 
-		boost::python::throw_error_already_set();
-	}
-	void RuntimeError(const char* error_string) {
-		PyErr_SetString(PyExc_RuntimeError, error_string);
-		boost::python::throw_error_already_set();
-	}
-	void ValueError(const char* error_string) {
-		PyErr_SetString(PyExc_ValueError, error_string);
-		boost::python::throw_error_already_set();
-	}
-	void StopIteration() { 
-		PyErr_SetString(PyExc_StopIteration, "Simulation finished."); 
-		boost::python::throw_error_already_set();
-	}
+    void NotImplementedError() {
+        PyErr_SetString(PyExc_NotImplementedError, "Feature not provided."); 
+        boost::python::throw_error_already_set();
+    }
+    void LengthError() { 
+        PyErr_SetString(PyExc_IndexError, "List lengths don't match."); 
+        boost::python::throw_error_already_set();
+    }
+    void RuntimeError(const char* error_string) {
+        PyErr_SetString(PyExc_RuntimeError, error_string);
+        boost::python::throw_error_already_set();
+    }
+    void ValueError(const char* error_string) {
+        PyErr_SetString(PyExc_ValueError, error_string);
+        boost::python::throw_error_already_set();
+    }
+    void StopIteration() { 
+        PyErr_SetString(PyExc_StopIteration, "Simulation finished."); 
+        boost::python::throw_error_already_set();
+    }
 
-	struct Interval {
+    struct Interval {
         /* A utility to handle the contracting interval of a bisection rootfinder.
          */
-		double lower, upper;
-		double length() const { return upper - lower; }
-		double midpoint() const { return (upper + lower) / 2.0; }
-	};
+        double lower, upper;
+        double length() const { return upper - lower; }
+        double midpoint() const { return (upper + lower) / 2.0; }
+    };
 
     //random utilites
-	struct vector_to_python_tuple {
-		vector_to_python_tuple() {
-			using namespace boost::python;
-			to_python_converter<const std::vector<double>, vector_to_python_tuple>();
-		}
+    struct vector_to_python_tuple {
+        vector_to_python_tuple() {
+            using namespace boost::python;
+            to_python_converter<const std::vector<double>, vector_to_python_tuple>();
+        }
 
-		static PyObject* convert(const std::vector<double>& x) {
+        static PyObject* convert(const std::vector<double>& x) {
             auto new_tuple = PyTuple_New(x.size());
             for(int i=x.size()-1; i>=0; --i) {
                 PyTuple_SetItem(new_tuple, i, PyFloat_FromDouble(x[i]));
             }
             return boost::python::incref(new_tuple);
-		}
-	};
+        }
+    };
 	struct vector_from_python_tuple {
-		vector_from_python_tuple() {
-			using namespace boost::python;
-			converter::registry::push_back(&convertible, &construct, 
-										   type_id<std::vector<double>>());
+        vector_from_python_tuple() {
+            using namespace boost::python;
+            converter::registry::push_back(&convertible, &construct, 
+                                           type_id<std::vector<double>>());
 		}
 
 		static void* convertible(PyObject* obj_ptr) {
-			if (!PyTuple_Check(obj_ptr)) return 0;
-			return obj_ptr;
+            if (!PyTuple_Check(obj_ptr)) return 0;
+            return obj_ptr;
 		}
 
 		static void construct(PyObject* obj_ptr,
-			    boost::python::converter::rvalue_from_python_stage1_data* data) {
-			using namespace boost::python;
-			assert(PyTuple_Check(obj_ptr));
-			unsigned int length = PyTuple_Size(obj_ptr);
-			void* storage = ((converter::rvalue_from_python_storage< std::vector<double> >*)data)->storage.bytes;
-			new (storage) std::vector<double>(length);
-			for(unsigned int i=0; i<length; ++i)
-				static_cast< std::vector<double>* >(storage)->at(i) 
-					= PyFloat_AsDouble(PyTuple_GetItem(obj_ptr, i));
-			data->convertible = storage;
+		        boost::python::converter::rvalue_from_python_stage1_data* data) {
+            using namespace boost::python;
+            assert(PyTuple_Check(obj_ptr));
+            unsigned int length = PyTuple_Size(obj_ptr);
+            void* storage = ((converter::rvalue_from_python_storage< std::vector<double> >*)data)->storage.bytes;
+            new (storage) std::vector<double>(length);
+            for(unsigned int i=0; i<length; ++i)
+                static_cast< std::vector<double>* >(storage)->at(i) 
+                    = PyFloat_AsDouble(PyTuple_GetItem(obj_ptr, i));
+            data->convertible = storage;
 		}
-	};
+    };
 
-	boost::python::object pass_through(const boost::python::object& obj) { return obj; }
+    boost::python::object pass_through(const boost::python::object& obj) { return obj; }
     double minimum(double x, double y) { 
         if(x>y) return y;
         else return x;
@@ -120,6 +120,12 @@ namespace lyapunov {
         typedef std::vector<double> state_type;
     
     protected:
+        /* current_time and current_state are temporary variables.
+         * Always fetch state information directly from the system object.
+         *
+         * saved_time and saved_state are not guaranteed to be initialized
+         * if stepper_state is CLEAN.
+         */
         state_type current_state, saved_state;
         double desired_time, current_time, saved_time, time_tolerance;
 
@@ -132,63 +138,7 @@ namespace lyapunov {
 		boost::python::object system, steps;
 		std::function<void(const state_type&, state_type&, double)> system_function;
 
-    public:
-        stepper_iterator() = delete;
-		stepper_iterator(boost::python::object sys, 
-					     boost::python::object time) 
-            : time_tolerance(0.00001) { //10 microseconds ... make this relative?
-            set_system(sys);
-            use_times(time);
-        }
-
-		boost::python::str get_status() const {
-            /* Returns what point the stepper is currently storing.
-             */
-			switch(stepper_state) {
-				case CLEAN:
-					return "nothing";
-				case LAST:
-					return "last step";
-				case BOUNDARY:
-					return "boundary";
-				default:
-					return "status undefined!";
-			}
-		}
-        bool tracking_events() const {
-            return not event_signs.empty();
-        }
-        double get_time_tolerance() const { return time_tolerance; }
-		void set_time_tolerance(double new_tolerance) {
-			if(new_tolerance >= 0) time_tolerance = new_tolerance;
-			else ValueError("Positive values only.");
-		}
-		boost::python::object get_system() const { return system; }
-        void set_system(boost::python::object new_system) {
-            /* Tell the stepper to integrate the given system.
-             */
-            namespace bp = boost::python;
-            system = new_system;
-            system_function = [this](const state_type& x, state_type& dx, const double t) { 
-                system.attr("state") = bp::make_tuple(t, x);
-                dx = bp::extract<state_type>(system()); 
-            };
-            saved_time = 0.0;
-            saved_state.resize(bp::len(system.attr("state")[1]));
-            stepper_state = CLEAN;
-            // State and event information will be updated when next is next called. 
-        }
-        virtual void use_times(boost::python::object time) {
-            /* Take user input for time data. For a fixed stepper, this means an iterable
-             * of times. For a variable stepper, it could also mean a single desired end 
-             * time. If a variable stepper is given
-             */
-			if(PyObject_HasAttrString(time.ptr(), "__iter__")) {
-                steps = time.attr("__iter__")();
-                desired_time = boost::python::extract<double>(steps.attr("next"));
-            } else ValueError("Provide a sequence of times at which to approximate the ODE.");
-        }
-        double get_step_size() const { return desired_time - current_time; }
+        virtual void reset_stepper() {}
         virtual bool error_acceptable() { return true; }
         virtual bool goal_achieved() { 
             /* Fetch a new time from the array thereof.
@@ -197,8 +147,43 @@ namespace lyapunov {
             desired_time = boost::python::extract<double>( steps.attr("next")() );
             return true;
         }
+        virtual double next_time() const { return desired_time; }
+        stepper_iterator(boost::python::object sys) 
+            : time_tolerance(0.00001),  // 10 microseconds ... make this relative?
+              event_signs(boost::python::len(sys.attr("state")[1]), 0.0),
+              signs_verified(false) { 
+            set_system(sys);
+        }
+
+    private:
+        void save_current() {
+            /* Save the current point in anticipation of stepping to the next.
+             */
+			namespace bp = boost::python;
+			bp::object state_tup = system.attr("state");
+			saved_time = bp::extract<double>(state_tup[0]);
+			saved_state = bp::extract<state_type>(state_tup[1]);
+            stepper_state = LAST;
+		}
+        void swap_states() {
+            /* Move the system and the stepper to the currently saved time.
+             */
+            if(stepper_state == CLEAN)
+                RuntimeError("Internal Error: No saved state to swap.");
+            std::swap(current_state, saved_state);
+            std::swap(current_time, saved_time);
+            update_system();
+        }
+        void update_system() {
+            // Move the system to the current state and time.
+            system.attr("state") = make_tuple(current_time, current_state);
+        }
 		bool event_occurred() const {
             /* Check to see whether any event functions crossed zero since the last step.
+             *
+             * Options for refactor: Have this return a list of events that occurred, so
+             * as to avoid duplication in find_root. Use a higher-order function that
+             * iterates through events and event signs at the same time.
              */
 			namespace bp = boost::python;
 			if(tracking_events()) {
@@ -210,6 +195,22 @@ namespace lyapunov {
 			} 
 			return false;
 		}
+        void verify_signs() {
+            /* Ensure that all event signs are nonzero;
+             * that is: make sure that event functions equal to
+             * zero at the initial conditions still get detected.
+             */
+            namespace bp = boost::python;
+            unsigned int zero_sign_count = 0;
+            for(unsigned int i=0; i<event_signs.size(); ++i) {
+                if(event_signs[i] == 0) {
+                    event_signs[i] = bp::extract<double>(system.attr("events")[i]);
+                    if(event_signs[i] == 0) ++zero_sign_count;
+                }
+            }
+            if(zero_sign_count == 0) 
+                signs_verified = true;
+        }
         boost::python::list find_root() {
 			/* Implements a simple bisection rootfinder.
              * Moves the system to within time_tolerance of the event boundary
@@ -258,9 +259,63 @@ namespace lyapunov {
             swap_states();
 			return flagged; 
 		}
-        double next_time() const { return desired_time; }
+
+    public:
+        stepper_iterator() = delete;
+		stepper_iterator(boost::python::object sys, boost::python::object time) 
+            : stepper_iterator(sys) {
+            use_times(time);
+        }
+
+		boost::python::str get_status() const {
+            /* Returns what point the stepper is currently storing.
+             */
+			switch(stepper_state) {
+				case CLEAN:
+					return "nothing";
+				case LAST:
+					return "last step";
+				case BOUNDARY:
+					return "boundary";
+				default:
+					return "status undefined!";
+			}
+		}
+        bool tracking_events() const {
+            return not event_signs.empty();
+        }
+        double get_time_tolerance() const { return time_tolerance; }
+		void set_time_tolerance(double new_tolerance) {
+			if(new_tolerance >= 0) time_tolerance = new_tolerance;
+			else ValueError("Positive values only.");
+		}
+		boost::python::object get_system() const { return system; }
+        void set_system(boost::python::object new_system) {
+            /* Tell the stepper to integrate the given system.
+             */
+            namespace bp = boost::python;
+            system = new_system;
+            system_function = [this](const state_type& x, state_type& dx, const double t) { 
+                system.attr("state") = bp::make_tuple(t, x);
+                dx = bp::extract<state_type>(system()); 
+            };
+            reset();
+        }
+        virtual void use_times(boost::python::object time) {
+            /* Take user input for time data. For a fixed stepper, this means an iterable
+             * of times. For a variable stepper, it could also mean a single desired end 
+             * time. 
+             */
+			if(PyObject_HasAttrString(time.ptr(), "__iter__")) {
+                steps = time.attr("__iter__")();
+                desired_time = boost::python::extract<double>(steps.attr("next")());
+            } else ValueError("Provide a sequence of times at which to approximate the ODE.");
+        }
+        double get_step_size() const { 
+            namespace bp = boost::python;
+            return desired_time - bp::extract<double>(system.attr("state")[0]); 
+        }
         virtual void step(double new_time) = 0;
-        virtual void reset_stepper() {}
         void reset() {
             /* Erase saved event signs and recheck the number of events.
              * Also wipe any internal states in the stepper.
@@ -271,28 +326,6 @@ namespace lyapunov {
             if(PyObject_HasAttrString(system.ptr(), "events"))
                 event_signs.resize(len(system.attr("events")), 0);
             stepper_state = CLEAN;
-        }
-        void save_current() {
-            /* Save the current point in anticipation of stepping to the next.
-             */
-			namespace bp = boost::python;
-			bp::object state_tup = system.attr("state");
-			saved_time = bp::extract<double>(state_tup[0]);
-			saved_state = bp::extract<state_type>(state_tup[1]);
-            stepper_state = LAST;
-		}
-        void swap_states() {
-            /* Move the system and the stepper to the currently saved time.
-             */
-            if(stepper_state == CLEAN)
-                RuntimeError("Internal Error: No saved state to swap.");
-            std::swap(current_state, saved_state);
-            std::swap(current_time, saved_time);
-            update_system();
-        }
-        void update_system() {
-            // Move the system to the current state and time.
-            system.attr("state") = make_tuple(current_time, current_state);
         }
         void step_across(boost::python::object new_state = boost::python::object()) {
             /* Jump the system across the event boundary discontinuously. Such a 
@@ -351,29 +384,12 @@ namespace lyapunov {
 
 			return bp::make_tuple(system.attr("state")[0], boost::python::list());
         }
-        void verify_signs() {
-            /* Ensure that all event signs are nonzero;
-             * that is: make sure that event functions equal to
-             * zero at the initial conditions still get detected.
-             */
-            namespace bp = boost::python;
-            unsigned int zero_sign_count = 0;
-            for(unsigned int i=0; i<event_signs.size(); ++i) {
-                if(event_signs[i] == 0) {
-                    event_signs[i] = bp::extract<double>(system.attr("events")[i]);
-                    if(event_signs[i] == 0) ++zero_sign_count;
-                }
-            }
-            if(zero_sign_count == 0) 
-                signs_verified = true;
-        }
     };
     class variable_stepper_iterator : public stepper_iterator {
     protected:
 		double absolute_tolerance, relative_tolerance;
 		state_type error;
-		double step_size, final_time;
-        bool free_iteration;
+		double step_size, final_time;  // final_time is only used if steps is None
 
         double get_error_index() {
             double error_index = 0.0;
@@ -387,29 +403,7 @@ namespace lyapunov {
         virtual unsigned int get_stepper_order() const = 0;
         virtual unsigned int get_error_order() const = 0;
 
-    public:
-        using stepper_iterator::stepper_iterator;
-
-		virtual void use_times(boost::python::object time) {
-            /* For variable_steppers, simulation time can be specified either as
-             * a list (as with simple_steppers) or a float. List calls are simply
-             * delegated to the stepper_wrapper version. Float calls give the stepper
-             * a 'goal' time at which they'll stop simulating, and otherwise let it
-             * choose step sizes freely. 
-             */
-			namespace bp = boost::python;
-            PyObject* time_ptr = time.ptr();
-			if(!PySequence_Check(time_ptr) && PyNumber_Check(time_ptr)) {
-				steps = boost::python::object();
-				final_time = bp::extract<double>(time);
-                if(step_size < 0) {
-				    step_size = 0.001*(final_time - 
-							bp::extract<double>(system.attr("state")[0]));
-                }
-			} else stepper_iterator::use_times(time);
-		}
-        double get_step_size() const { return step_size; }
-        virtual bool error_acceptable() {
+        bool error_acceptable() override {
             /* Computes an error index and checks that it's within bounds. If the error
              * is too large, update the step size, back up, and return false. If it's 
              * too small, update the step size and return true. 
@@ -427,23 +421,55 @@ namespace lyapunov {
             }
 			return true;
         }
-        virtual bool goal_achieved() {
+        bool goal_achieved() override {
             /* If no time iterable is set, always return true. If one is set,
              * return true only if the stepper has reached the current next step, and
              * assign a new next step. 
              */
-            if(free_iteration) {
+            if(steps.is_none()) {
                 if(current_time >= final_time) StopIteration();
                 return true;
             } else if(current_time >= desired_time) {
                 return stepper_iterator::goal_achieved();
             } else return false;
         }
-        double next_time() const {
+        double next_time() const override {
             /* Returns the next time to step to, abbreviating the step if needed.
              */
             return minimum(step_size + current_time, desired_time);
         }
+    
+    public:
+        variable_stepper_iterator() = delete;
+        variable_stepper_iterator(boost::python::object sys,
+                                  boost::python::object time,
+                                  double first_step_size=-1)
+            : stepper_iterator(sys), 
+              absolute_tolerance(0.000001),
+              relative_tolerance(0.001),
+              error(saved_state.size()),
+              step_size(first_step_size) {
+            use_times(time);
+        }
+
+		void use_times(boost::python::object time) override {
+            /* For variable_steppers, simulation time can be specified either as
+             * a list (as with simple_steppers) or a float. List calls are simply
+             * delegated to the stepper_wrapper version. Float calls give the stepper
+             * a 'goal' time at which they'll stop simulating, and otherwise let it
+             * choose step sizes freely. 
+             */
+			namespace bp = boost::python;
+			if(!PySequence_Check(time.ptr()) && PyNumber_Check(time.ptr())) {
+				steps = bp::object();  // default ctor points to None
+				final_time = bp::extract<double>(time);
+                if(step_size < 0) {
+				    step_size = 0.001*(final_time - 
+							bp::extract<double>(system.attr("state")[0]));
+                }
+			} else stepper_iterator::use_times(time);
+		}
+        double get_step_size() const { return step_size; }
         double get_relative_tolerance() const { return relative_tolerance; }
         void set_relative_tolerance(double new_relative_tolerance) {
             if(new_relative_tolerance > 0.0) 
@@ -600,7 +626,7 @@ BOOST_PYTHON_MODULE(solvers) {
 	LYAPUNOV_EXPOSE_VARIABLE_STEPPER(dormand_prince, variable_multistepper, 5, 4)
 
 	LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth)
-	//ode::adams_bashforth_moulton lacks a reset method for some reason (a bug?)
+	//ode::adams_bashforth_moulton lacks a reset method until next boost release
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth_moulton)
 	
 	//think about Bulirsch-Stoer solver too!
