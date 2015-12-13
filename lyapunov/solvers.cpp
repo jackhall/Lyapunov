@@ -126,11 +126,11 @@ namespace lyapunov {
         enum stepper_state_type {CLEAN, LAST, BOUNDARY};
         stepper_state_type stepper_state;
 
-    public:
 		boost::python::object system, steps;
         typedef std::vector<double> state_type;
 		std::function<void(const state_type&, state_type&, double)> system_function;
 
+    public:
         stepper_iterator() = delete;
 		stepper_iterator(boost::python::object sys, 
 					     boost::python::object time) 
@@ -256,8 +256,8 @@ namespace lyapunov {
             swap_states();
 			return flagged; 
 		}
-        virtual double next_time() { return desired_time; }
-        virtual void step(double next_time) = 0;
+        double next_time() const { return desired_time; }
+        virtual void step(double new_time) = 0;
         virtual void reset_stepper() {}
         void reset() {
             /* Erase saved event signs and recheck the number of events.
@@ -367,6 +367,7 @@ namespace lyapunov {
         }
     };
     class variable_stepper_iterator : public stepper_iterator {
+    protected:
 		double absolute_tolerance, relative_tolerance;
 		std::vector<double> error;
 		double step_size, final_time;
@@ -382,7 +383,6 @@ namespace lyapunov {
             return error_index;
         }
 
-    protected:
         virtual double get_stepper_order() = 0;
         virtual double get_error_order() = 0;
 
@@ -436,520 +436,76 @@ namespace lyapunov {
                 return stepper_iterator::goal_achieved();
             } else return false;
         }
-        virtual double next_time() {
+        double next_time() const {
             /* Returns the next time to step to, abbreviating the step if needed.
              */
             return minimum(step_size + current_time, desired_time);
         }
+        double get_relative_tolerance() const { return relative_tolerance; }
+        void set_relative_tolerance(double new_relative_tolerance) {
+            if(new_relative_tolerance > 0.0) 
+                relative_tolerance = new_relative_tolerance;
+            else ValueError("Tolerances cannot be negative.");
+        }
+        double get_absolute_tolerance() const { return absolute_tolerance; }
+        void set_absolute_tolerance(double new_absolute_tolerance) {
+            if(new_absolute_tolerance > 0.0) 
+                absolute_tolerance = new_absolute_tolerance;
+            else ValueError("Tolerances cannot be negative.");
+        }
     };
-	class stepper_wrapper {
-    /* This class represents both a wrapper for boost::numeric::odeint steppers and a 
-     * state machine for a proper simulation with rootfinding. It appears to python as an
-     * iterator.
-     *
-     * The state machine always maintains a second system state. During normal solving,
-     * this means that the stepper can always undo a step. When an event occurs the
-     * stepper already has a bounded interval. The rootfinder then narrows this
-     * interval until it's no wider than time_tolerance. The current state is considered
-     * to be the one just before the event occurs. The saved state is just after. 
-     * Calling sets the current state to the saved state (or to whatever the user 
-     * wants).
-     */
-	public:
-		typedef double num_type;
-		typedef std::vector<num_type> state_type;
-
-	protected: 
-        // NOTHING: no saved point
-        // LAST: the previous point is saved
-        // BOUNDARY: the point on the other side of an event boundary is saved
-		enum stepper_state_type {NOTHING, LAST, BOUNDARY};
-
-		boost::python::object system, steps, next_time_obj;
-        state_type temporary; // stores new states after stepping but before event checking
-		state_type saved_state, event_signs; 
-		num_type saved_time; 
-		stepper_state_type saved_information; // which point is stored: previous or boundary
-		std::function<void(const state_type&, state_type&, num_type)> system_function;
-        bool signs_verified; // true if all event_signs are nonzero
-		bool events_occurred() const {
-            /* Check to see whether any event functions crossed zero since the last step.
-             */
-			namespace bp = boost::python;
-			if(tracking_events) {
-				bp::object event, iter = system.attr("events").attr("__iter__")();
-				for(auto x : event_signs) {
-					event = iter.attr("next")();
-					if(x * bp::extract<num_type>( event() ) < 0) return true;
-				}
-			} 
-			return false;
-		}
-		void update_signs() {
-            /* Record the value of each event function at the current state. The only
-             * important aspect of these numbers is their sign. If any of the values 
-             * are exactly zero, try to record a value at the next step.
-             */
-			namespace bp = boost::python;
-            event_signs.clear();
-            auto sign_check = 1.0; //any nonzero value will do
-            if(PyObject_HasAttrString(system.ptr(), "events")) {
-                for(bp::stl_input_iterator<bp::object> iter( system.attr("events") ), end;
-                      iter != end ; ++iter) {
-                    event_signs.push_back(bp::extract<num_type>( (*iter)() ));
-                    sign_check *= event_signs.back();
-                }
-            }
-            if(sign_check != 0) signs_verified = true;
-            if(event_signs.size() == 0) tracking_events = false;
-
-		}
-        void verify_signs() {
-            /* Ensure that all event signs are nonzero;
-             * that is: make sure that event functions equal to
-             * zero at the initial conditions still get detected.
-             */
-            namespace bp = boost::python;
-            unsigned int zero_sign_count = 0;
-            for(int i=event_signs.size()-1; i>=0; --i) {
-                if(event_signs[i] == 0.0) {
-                    event_signs[i] = bp::extract<num_type>(system.attr("events")[i]);
-                    if(event_signs[i] == 0) ++zero_sign_count;
-                }
-            }
-            if(zero_sign_count == 0) signs_verified = true;
-        }
-		void save_last() {
-            /* Save the current point in anticipation of stepping to the next.
-             */
-			namespace bp = boost::python;
-			bp::object state_tup = system.attr("state");
-			saved_time = bp::extract<num_type>(state_tup[0]);
-			saved_state = bp::extract<state_type>(state_tup[1]);
-			saved_information = LAST;
-		}
-		
-	public:
-		num_type time_tolerance; // smallest unit of time the solver/rootfinder can see
-		bool tracking_events; // true if the event list is nonempty
-
-		stepper_wrapper() = delete;
-		stepper_wrapper(boost::python::object sys, 
-					    boost::python::object time)
-			: system(sys), 
-			  steps(), // actually set in use_times
-			  next_time_obj(), // actually set in use_times
-			  temporary( boost::python::len(sys.attr("state")[1]) ),
-			  saved_state( temporary.size() ),
-			  event_signs(), // actually set in update signs
-			  saved_time(0.0),
-			  saved_information(NOTHING),
-			  system_function([this](const state_type& x, state_type& dx, const num_type t) { 
-                  namespace bp = boost::python;
-                  system.attr("state") = bp::make_tuple(t, x);
-                  dx = bp::extract<state_type>(system()); } ),
-              signs_verified(false), // actually set in update_signs (and verify_signs)
-			  time_tolerance(0.00001), // 10 microseconds ... make this relative?
-			  tracking_events(true) { // actually set in update_signs
-			use_times(time);
-			update_signs(); 
-		}
-		virtual void step(num_type next_time) = 0;
-		virtual void step_back() {
-            /* Return the stepper to the previous point, if saved. Note that there is
-             * no way to move back two steps in a row, since only one point is saved 
-             * at a time.
-             */
-			namespace bp = boost::python;
-			if(saved_information != LAST) RuntimeError("Last state not saved.");
-			system.attr("state") = bp::make_tuple(saved_time, saved_state);
-			reset();
-		}
-        void reset_with_events() {
-            /* Make sure no point is saved by the solver, and recompute the sign of
-             * each event function.
-             */
-            reset();
-            update_signs();
-        }
-		virtual void reset() { 
-            saved_information = NOTHING; 
-        }
-		void step_across(boost::python::object new_state = boost::python::object()) { 
-            /* Move the system across the event boundary identified by the rootfinder.
-             * This does not invoke the solver, since the point across the boundary is 
-             * already known. After moving, recompute event function signs.
-             */
-			namespace bp = boost::python;
-			if(saved_information != BOUNDARY) RuntimeError("No boundary to step across.");
-			bp::object state_tup;
-			if(new_state.is_none()) state_tup = bp::make_tuple(saved_time, saved_state);
-			else state_tup = bp::make_tuple(saved_time, new_state);
-			system.attr("state") = state_tup;
-			reset_with_events(); 
-		}
-		num_type get_step_size() const { 
-            /* Compute the time difference between this point and the saved previous point.
-             * Doesn't work without a saved previous point.
-             */
-			namespace bp = boost::python;
-			if(saved_information != LAST) RuntimeError("Last state not saved.");
-			return bp::extract<num_type>(system.attr("state")[0]) - saved_time;
-		}
-		num_type get_time_tolerance() const { return time_tolerance; }
-		void set_time_tolerance(num_type new_tolerance) {
-			if(new_tolerance >= 0) time_tolerance = new_tolerance;
-			else ValueError("Positive values only.");
-		}
-		boost::python::object get_system() const { return system; }
-		void set_system(boost::python::object new_system) { system = new_system; }
-		void use_times(boost::python::object time) {
-            /* Set the iterable which generates time steps.
-             */
-			steps = time.attr("__iter__")(); 
-			next_time_obj = boost::python::object();
-		}
-		boost::python::object next() {
-            /* This method makes the wrapper an iterable in python. It numerically 
-             * estimates the state at the next time step and checks to see if any
-             * event functions changed sign. If so, it calls the rootfinder to move
-             * the system right up to the event boundary without crossing. 
-             */
-			namespace bp = boost::python;
-            //if an event occurred, step through it
-            if(saved_information == BOUNDARY) step_across();
-			//get time for this next step
-			if( next_time_obj.is_none() ) 
-				next_time_obj = steps.attr("next")(); //may throw StopIteration
-			num_type next_time = bp::extract<num_type>(next_time_obj);
-			//take the step
-			step(next_time);
-			//check for event function sign changes, if any
-			if( events_occurred() ) {
-				auto flagged = find_root(); //the active event functions
-				//next_time_obj is not reset!
-				return bp::make_tuple(system.attr("state")[0], flagged);
-			} else {
-				//reset next_time_obj to NoneType so the next call
-				//will continue iterating through steps
-				next_time_obj = bp::object();
-				return bp::make_tuple(system.attr("state")[0], bp::list());
-			}
-            if(not signs_verified) verify_signs();  //check that signs are nonzero
-		}
-		boost::python::object find_root() {
-			/* Implements a simple bisection rootfinder.
-             * Moves the system to within time_tolerance of the event boundary
-             * and saves a point just across the boundary.
-             *
-             * If more than one event is detected, the rootfinder will stop at the
-             * first one it finds. If the event boundaries are within time_tolerance
-             * of each other, both get detected.
-             */
-			namespace bp = boost::python;
-
-			//initialize interval and step size goal
-			Interval interval = {saved_time, 
-								 bp::extract<num_type>(system.attr("state")[0]) };
-
-			//Revert (need to be able to step back across the boundary)
-			step_back();
-
-			//main rootfinding loop	
-			while(interval.length() > time_tolerance) {
-				//step to midpoint of interval
-				step(interval.midpoint());
-
-				//check for sign changes
-				if( events_occurred() ) {
-					step_back();
-					interval.upper = interval.midpoint();
-				} else interval.lower = interval.midpoint();
-			}
-
-			//find out which events changed sign and return them
-			step(interval.upper);
-			num_type across_time = bp::extract<num_type>(system.attr("state")[0]);
-			state_type across_state = bp::extract<state_type>(system.attr("state")[1]);
-			bp::list flagged;
-			bp::object event, iter = system.attr("events").attr("__iter__")();
-			for(auto x : event_signs) {
-				event = iter.attr("next")();
-				if(x * bp::extract<num_type>(event()) < 0) 
-					flagged.append(event);
-			}
-			step_back();
-
-			//save state for step_across
-			saved_time = across_time;
-			saved_state = std::move(across_state);
-			saved_information = BOUNDARY;
-			return flagged; 
-		}
-		boost::python::str get_status() const {
-            /* Returns what point the stepper is currently storing.
-             */
-			switch(saved_information) {
-				case NOTHING:
-					return "nothing";
-				case LAST:
-					return "last step";
-				case BOUNDARY:
-					return "boundary";
-				default:
-					return "status undefined!";
-			}
-		}
-	};
-	class variable_stepper_wrapper : public stepper_wrapper {
-    /* As a wrapper of variable step size solvers, this class extends stepper_wrapper
-     * to (optionally) independently choose its own step size, halting at a given 
-     * final time.
-     */
-	protected:
-		typedef stepper_wrapper base_type;
-		num_type absolute_tolerance, relative_tolerance;
-		state_type current_state, error; 
-		num_type step_size, final_time;
-        bool final_time_reached;
-
-	public:
-		variable_stepper_wrapper() = delete;
-		variable_stepper_wrapper(boost::python::object sys,
-								 boost::python::object time) 
-			: base_type(sys, boost::python::list()), 
-			  absolute_tolerance(0.000001),
-			  relative_tolerance(0.001),
-			  current_state(saved_state.size()),
-			  error(saved_state.size()),
-	   		  step_size(-1),  // flagged to recompute
-	   		  final_time(0.0),  // actually set in use_times
-              final_time_reached(false) {
-			use_times(time);
-		}
-		virtual void step_back() {
-            /* See step_back docstring for stepper_wrapper.
-             */
-            final_time_reached = false;
-            base_type::step_back();
-        }
-        num_type get_step_size() const { return step_size; }
-		num_type get_relative_tolerance() const { return relative_tolerance; }
-		void set_relative_tolerance(num_type new_tolerance) {
-			if(new_tolerance >= 0) relative_tolerance = new_tolerance;
-			else ValueError("Positive values only.");
-		}
-		num_type get_absolute_tolerance() const { return absolute_tolerance; }
-		void set_absolute_tolerance(num_type new_tolerance) {
-			if(new_tolerance >= 0) absolute_tolerance = new_tolerance;
-			else ValueError("Positive values only.");
-		}
-		void use_times(boost::python::object time) {
-            /* For variable_steppers, simulation time can be specified either as
-             * a list (as with simple_steppers) or a float. List calls are simply
-             * delegated to the stepper_wrapper version. Float calls give the stepper
-             * a 'goal' time at which they'll stop simulating, and otherwise let it
-             * choose step sizes freely. 
-             */
-			namespace bp = boost::python;
-            PyObject* time_ptr = time.ptr();
-			if(!PySequence_Check(time_ptr) && PyNumber_Check(time_ptr)) {
-				steps = boost::python::object();
-				final_time = bp::extract<num_type>(time);
-                if(step_size < 0) {
-				    step_size = 0.001*(final_time - 
-							bp::extract<num_type>(system.attr("state")[0]));
-                }
-			} else base_type::use_times(time);
-            final_time_reached = false;
-		}
-		virtual void try_step(num_type current_time, num_type current_step_size) = 0;
-        virtual void try_free_step(num_type current_step_size) = 0;
-        double compute_error_index() {
-            /* Error index is a metric for deciding what step_size should be. An index > 1.0
-             * indicates that error is too large and the step_size should diminish. Index < 0.5
-             * means that the step size is more precise than it needs to be and may increase.
-             */
-            double error_index = 0.0;
-            for(int i=error.size()-1; i>=0; --i) {
-				error_index = maximum(error_index, std::abs(error[i]) /
-							  (absolute_tolerance + relative_tolerance*std::abs(temporary[i])));
-			}
-            return error_index;
-        }
-		virtual void increase_step(num_type error_index) = 0; 		
-        virtual bool decrease_step(num_type error_index, num_type original_step_size) = 0;
-		void free_step() {
-            /* Looks like some code from step is duplicated.
-             */
-			namespace bp = boost::python;
-            if(final_time_reached) StopIteration();
-			save_last();
-			bool step_successful = false;
-			num_type error_index, current_step_size;
-			if(step_size < (final_time - saved_time)) {
-				while(!step_successful) {
-                    try_free_step(step_size);
-				    current_step_size = step_size;
-                   	error_index = compute_error_index(); 
-                    increase_step(error_index);
-					step_successful = decrease_step(error_index, step_size); 
-				}
-			} else {
-				current_step_size = final_time - saved_time;
-                final_time_reached = true;
-				while(!step_successful) {
-                    try_free_step(current_step_size);
-				    error_index = compute_error_index(); 
-					step_successful = decrease_step(error_index, current_step_size); 
-                    if(!step_successful) {
-                        current_step_size = step_size;
-                        final_time_reached = false;
-                    }
-				}
-			}
-			system.attr("state") = bp::make_tuple(saved_time + current_step_size, 
-												  temporary);
-		}
-		virtual void step(num_type next_time) {
-            /* Takes however many error-controlled steps are needed to reach
-             * next_time from current_time. None of the intermediate steps are
-             * returned and the stepper acts as though it only took one step, 
-             * but error is guaranteed to remain within bounds.
-             */
-			namespace bp = boost::python;
-			save_last();
-			auto current_time = saved_time; 
-            current_state = saved_state;  // for intermediate steps
-			num_type current_step_size, error_index=0.0;
-
-            // Make sure that we are integrating forward.
-			if(step_size < 0) step_size = next_time - current_time;
-            if(std::abs(step_size) < std::numeric_limits<num_type>::epsilon()) {
-                step_size = -1;  // a more obviously invalid step size
-                return;
-            }
-
-			bool last_step = false;
-			while(true) {
-                // Would the next step hypothetically get us past our goal, assuming
-                // that error stays within tolerance? 
-                // If so, adjust step size to precisely reach our goal.
-                // If not, use the solver's step_size
-				current_step_size = next_time - current_time;
-				if(step_size < current_step_size) { 
-					current_step_size = step_size;
-					last_step = false;
-				} else last_step = true; 
-			   
-                // Take step, check error. Next state will be stored in temporary.
-                try_step(current_time, current_step_size);
-               	error_index = compute_error_index();
-
-                // Adjust step size if necessary.
-				if(error_index > 1.0) {
-					// Calculate smaller step_size and try again.
-					decrease_step(error_index, current_step_size);
-					continue;
-				} else if(last_step) {
-                    // The last step was successful!
-					break;
-				} else if(error_index < 0.5) {
-					// Increase step_size if current_step_size came from the solver.
-					increase_step(error_index);
-				}
-
-                // The step was successful, but we aren't done yet. 
-				current_time += current_step_size;
-				std::swap(current_state, temporary);
-			}
-			system.attr("state") = bp::make_tuple(next_time, temporary);
-		}
-		boost::python::object next() {
-            /*
-             * There is quite a bit of redundancy with base_type::next, but
-             * the tasks common to both are interspersed with tasks that are
-             * not.
-             *
-             * It's possible I could factor this code a little better by 
-             * tying find_root more strongly with calls to step.
-             */
-			namespace bp = boost::python;
-			if(steps.is_none()) {  // if given a float instead of a list for time
-                if(saved_information == BOUNDARY) step_across();
-				free_step(); // simple step, no goal
-				if( events_occurred() ) {
-					auto flagged = find_root();
-					return bp::make_tuple(system.attr("state")[0], flagged);
-				} else {
-                    // unlike base_type::next, no need to reset next_time_obj
-					return bp::make_tuple(system.attr("state")[0], bp::list());
-				}
-                // Check that event signs are nonzero.
-                if(not signs_verified) verify_signs();
-			} else {
-				return base_type::next();
-			}
-		}	
-	};	
 	template<typename stepper_type>
-	class simple_stepper : public stepper_iterator {
+	struct simple_stepper : public stepper_iterator {
         /* For basic solvers that:
          *  - do not vary their own step size 
          *  - do not make use of prior state information
          */
-    protected:
 		stepper_type stepper;
 
-	public:
 		using stepper_iterator::stepper_iterator;
-		virtual void step() {
+		virtual void step(double new_time) {
             namespace bp = boost::python;
-            auto current_time = next_time();
 			stepper.do_step(system_function, 
 							saved_state, 
 							saved_time, 
 							current_state, 
-							current_time - saved_time); //(sys, xin, tin, xout, h)
-			system.attr("state") = bp::make_tuple(current_time, current_state);
+							new_time - saved_time); //(sys, xin, tin, xout, h)
+			system.attr("state") = bp::make_tuple(new_time, current_state);
 		}
 	};
 	template<typename stepper_type>
-	class simple_multistepper : public simple_stepper<stepper_type> {
+	struct simple_multistepper : public simple_stepper<stepper_type> {
         /* For solvers that:
          *  - do not vary their own step size 
          *  - make use of prior state information
          */
-    public:
 		using simple_stepper<stepper_type>::simple_stepper;
 		virtual void reset_stepper() { stepper.reset(); }
 	};
 	template<typename stepper_type, unsigned int stepper_order, unsigned int error_order>
-	class variable_stepper : public variable_stepper_iterator {
+	struct variable_stepper : public variable_stepper_iterator {
         /* For solvers that:
          *  - vary their own step size 
          *  - do not make use of prior state information
          */
 		stepper_type stepper;
 
-	public:
 		using variable_stepper_iterator::variable_stepper_iterator;
-		virtual void step() {
+		virtual void step(double new_time) {
             namespace bp = boost::python;
-            auto current_time = next_time();
 			stepper.do_step(system_function,
 							saved_state,
 							saved_time,
 							current_state,
-							current_time - saved_time,
+							new_time - saved_time,
 							error); // (sys, xin, tin, xout, h, err)
-            system.attr("state") = bp::make_tuple(current_time, current_state);
+            system.attr("state") = bp::make_tuple(new_time, current_state);
 		}
         virtual unsigned int get_stepper_order() const { return stepper_order; }
         virtual unsigned int get_error_order() const { return error_order; }
 	};
 	template<typename stepper_type, unsigned int stepper_order, unsigned int error_order>
-	class variable_multistepper : 
+	struct variable_multistepper : 
       public variable_stepper<stepper_type, stepper_order, error_order> {
         /* For solvers that both:
          *  - vary their own step size 
@@ -1024,7 +580,7 @@ BOOST_PYTHON_MODULE(solvers) {
 	vector_from_python_tuple tup2vec;
 	//to_python_converter<std::vector<double>, vector_to_python_tuple>();
 
-	typedef stepper_wrapper::state_type state_type;
+	typedef stepper_iterator::state_type state_type;
 
 	typedef ode::euler<state_type> euler;
 	LYAPUNOV_EXPOSE_STEPPER(euler, simple_stepper)
