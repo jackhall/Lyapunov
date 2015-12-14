@@ -148,7 +148,10 @@ namespace lyapunov {
             return true;
         }
         virtual double next_time() const { return desired_time; }
-        stepper_iterator(boost::python::object sys) 
+
+        // This constructor is only called by variable_stepper_iterator because 
+        // dynamic dispatch of use_signs is impossible in the public constructor.
+        stepper_iterator(boost::python::object sys)
             : time_tolerance(0.00001),  // 10 microseconds ... make this relative?
               event_signs(boost::python::len(sys.attr("state")[1]), 0.0),
               signs_verified(false) { 
@@ -178,22 +181,34 @@ namespace lyapunov {
             // Move the system to the current state and time.
             system.attr("state") = make_tuple(current_time, current_state);
         }
-		bool event_occurred() const {
-            /* Check to see whether any event functions crossed zero since the last step.
-             *
-             * Options for refactor: Have this return a list of events that occurred, so
-             * as to avoid duplication in find_root. Use a higher-order function that
-             * iterates through events and event signs at the same time.
+		template<typename FUNCTION>
+        FUNCTION for_events(FUNCTION f) {
+            /* Execute a function of two variables for each event. The first
+             * argument is the event function, and the second is the reference 
+             * value for that function. The function should return a boolean;
+             * returning true signals this function to stop iterating early.
              */
-			namespace bp = boost::python;
-			if(tracking_events()) {
-				bp::object event, iter = system.attr("events").attr("__iter__")();
-				for(auto x : event_signs) {
-					event = iter.attr("next")();
-					if(x * bp::extract<double>( event() ) < 0) return true;
-				}
-			} 
-			return false;
+            namespace bp = boost::python;
+            if(tracking_events()) {
+                bp::object event, iter = system.attr("events").attr("__iter__")();
+                for(auto x : event_signs) {
+                    bool stop = f(iter.attr("next")(), x);
+                    if(stop) break;
+                }
+            }
+            return f;
+        }
+        bool event_occurred() {
+            /* Check to see whether any event functions crossed zero since the last step.
+             * Would be const, but then it couldn't call for_events.
+             */
+            namespace bp = boost::python;
+            auto occurred = false;
+            for_events([&occurred](bp::object event, double saved) {
+                occurred = (bp::extract<double>(event()) * saved) < 0;
+                return occurred;
+            });
+			return occurred;
 		}
         void verify_signs() {
             /* Ensure that all event signs are nonzero;
@@ -201,15 +216,12 @@ namespace lyapunov {
              * zero at the initial conditions still get detected.
              */
             namespace bp = boost::python;
-            unsigned int zero_sign_count = 0;
-            for(unsigned int i=0; i<event_signs.size(); ++i) {
-                if(event_signs[i] == 0) {
-                    event_signs[i] = bp::extract<double>(system.attr("events")[i]);
-                    if(event_signs[i] == 0) ++zero_sign_count;
-                }
-            }
-            if(zero_sign_count == 0) 
-                signs_verified = true;
+            signs_verified = true;
+            for_events([this](bp::object event, double& saved) {
+                if(saved == 0) saved = bp::extract<double>(event());
+                signs_verified &= (saved != 0);
+                return false;
+            });
         }
         boost::python::list find_root() {
 			/* Implements a simple bisection rootfinder.
@@ -248,12 +260,11 @@ namespace lyapunov {
 			// Find out which events changed sign and return them.
             swap_states();
 			bp::list flagged;
-			bp::object event, iter = system.attr("events").attr("__iter__")();
-			for(auto x : event_signs) {
-				event = iter.attr("next")();
-				if(x * bp::extract<double>(event()) < 0) 
-					flagged.append(event);
-			}
+            for_events([&flagged](bp::object event, double saved) {
+                if((bp::extract<double>(event()) * saved) < 0)
+                    flagged.append(event);
+                return false;
+            });
 
 			// Save state for step_across.
             swap_states();
