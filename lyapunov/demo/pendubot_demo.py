@@ -37,13 +37,13 @@ class Observer(object):
         m1, m2, J1, J2 = sym.symbols("m1 m2 J1 J2")
         l1, l2, L1 = sym.symbols("l1 l2 L1")
         parameters = {g: 9.81,
-                      m1: 1,
-                      m2: 1,
-                      J1: .1,
-                      J2: .1,
-                      l1: .2,
-                      l2: .2,
-                      L1: .3}
+                      m1: .4825,
+                      m2: .2208,
+                      J1: .00803,
+                      J2: .001812,
+                      l1: .116,
+                      l2: .134,
+                      L1: .21}
         theta1, theta2, h1, h2, b1, b2 = sym.symbols("theta1 theta2 h1 h2 b1 b2")
         statelist = [theta1, theta2, h1, h2, b1, b2]
         theta1dot = h1 / (m1*l1**2 + J1)
@@ -80,16 +80,22 @@ class Observer(object):
         gradientsubs = (dfeval[0,2], dfeval[1,2], dfeval[1,3], dfeval[2,2], 
                         dfeval[2,4], dfeval[3,2], dfeval[3,3], dfeval[3,5])
         char_poly = self.char_poly(gradientsubs)
-        if numpy.linalg.cond(char_poly) < 1000: 
+        #if numpy.linalg.cond(char_poly) < 2000: 
+        try:
+            #serious conditioning problems here
             col1 = numpy.linalg.solve(char_poly, self.desired_coefficients)
+        except numpy.linalg.LinAlgError:
+            L = [[0,0] for index in range(6)]
+        else:
             L = [[-col1[0], 1],
                  [-col1[1], 1 - dfeval[1,1]],
                  [-col1[2] - dfeval[2,0], 1 - dfeval[2,1]],
                  [-col1[3] - dfeval[3,0], 1 - dfeval[3,1]],
                  [-col1[4], 1],
                  [-col1[5], 1]]
-        else:
-            L = [[0,0] for index in range(6)]
+            for row in L:
+                for element in row:
+                    element = element if element < 100 else 100
 
         #compute error of current output estimate given actual outputs
         error = [y - yhat for y, yhat in zip(self.y(), self.state.x[:2])]
@@ -98,16 +104,23 @@ class Observer(object):
 
 
 def run_pendubot_demo():
-    filename = "pendubot_run1.dat"
+    filename = "pendubot_run2.dat"
+    print "Reading and interpolating data..."
     reader = Reader(filename)
+    print "Configuring observer..."
     observer = Observer(reader.theta)
     pendubot = lyapunov.ParallelSystems([reader, observer])
     observer.y = reader.theta
     observer.state = 0.0, reader.theta() + (0.1, 0.1) + (0.1, 0.1) 
 
     record = lyapunov.Recorder(pendubot)
-    stepper = lyapunov.adams_bashforth4(pendubot, reader.time_data)
+    stepper = lyapunov.adams_bashforth4(pendubot, numpy.linspace(0, 10, 1000))
+    mark = 1
+    print "Simulating 10 of", reader.time_data[-1], "sec..."
     for t, _ in stepper:
+        if t > mark:
+            print "time = ", mark
+            mark += 1
         record.log()
 
     print "b1 ~=", observer.state.x[-2]
