@@ -152,22 +152,18 @@ namespace lyapunov {
         // This constructor is only called by variable_stepper_iterator because 
         // dynamic dispatch of use_signs is impossible in the public constructor.
         stepper_iterator(boost::python::object sys)
-            : time_tolerance(0.00001),  // 10 microseconds ... make this relative?
-              event_signs(boost::python::len(sys.attr("state")[1]), 0.0),
+            : current_state(boost::python::extract<state_type>(sys.attr("state")[1])),
+              saved_state(current_state.size(), 0.0),
+              desired_time(0.0),
+              current_time(boost::python::extract<double>(sys.attr("state")[0])),
+              saved_time(0.0),
+              time_tolerance(0.00001),  // 10 microseconds ... make this relative?
+              event_signs(current_state.size(), 0.0),
               signs_verified(false) { 
             set_system(sys);
         }
 
     private:
-        void save_current() {
-            /* Save the current point in anticipation of stepping to the next.
-             */
-			namespace bp = boost::python;
-			bp::object state_tup = system.attr("state");
-			saved_time = bp::extract<double>(state_tup[0]);
-			saved_state = bp::extract<state_type>(state_tup[1]);
-            stepper_state = LAST;
-		}
         void swap_states() {
             /* Move the system and the stepper to the currently saved time.
              */
@@ -179,7 +175,7 @@ namespace lyapunov {
         }
         void update_system() {
             // Move the system to the current state and time.
-            system.attr("state") = make_tuple(current_time, current_state);
+            system.attr("state") = boost::python::make_tuple(current_time, current_state);
         }
 		template<typename FUNCTION>
         FUNCTION for_events(FUNCTION f) {
@@ -310,6 +306,8 @@ namespace lyapunov {
                 system.attr("state") = bp::make_tuple(t, x);
                 dx = bp::extract<state_type>(system()); 
             };
+            current_state = bp::extract<state_type>(system.attr("state")[1]);
+            current_time = bp::extract<double>(system.attr("state")[0]);
             reset();
         }
         virtual void use_times(boost::python::object time) {
@@ -376,7 +374,9 @@ namespace lyapunov {
                     verify_signs();
                
                 // Take a step.
-                save_current();
+                saved_time = bp::extract<double>(system.attr("state")[0]);
+                saved_state = bp::extract<state_type>(system.attr("state")[1]);
+                stepper_state = LAST;
                 step(next_time());
 
                 // Check for events and call the rootfinder if necessary.

@@ -97,3 +97,7 @@ def run_subsystem_demo():
     plt.plot(x_out[:,0], x_out[:,1])
     plt.show()
 
+
+if __name__ == "__main__":
+    run_subsystem_demo();
+
