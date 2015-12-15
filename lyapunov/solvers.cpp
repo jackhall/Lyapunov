@@ -438,7 +438,9 @@ namespace lyapunov {
              * assign a new next step. 
              */
             if(steps.is_none()) {
-                if(current_time >= final_time) StopIteration();
+                if(current_time >= final_time) 
+                    StopIteration();
+                desired_time = current_time + step_size;
                 return true;
             } else if(current_time >= desired_time) {
                 return stepper_iterator::goal_achieved();
@@ -478,6 +480,7 @@ namespace lyapunov {
 				    step_size = 0.001*(final_time - 
 							bp::extract<double>(system.attr("state")[0]));
                 }
+                desired_time = step_size + current_time;
 			} else stepper_iterator::use_times(time);
 		}
         double get_step_size() const { return step_size; }
@@ -644,3 +647,11 @@ BOOST_PYTHON_MODULE(solvers) {
 	//write a dense_stepper_wrapper?
 }
 
+/* Notes on the next refactor:
+ *
+ * Separate the state machine logic from python, and treat free steppers as a different
+ * type. Separate rootfinding logic from the rest, and wrap it around the solver logic.
+ * This way any number of rootfinders can be written that use the same stepper/state 
+ * machine interface, and it gets easier to write fancier rootfinders. Keep everything
+ * in pure C++ until the top level, which is the python interface.
+ */
