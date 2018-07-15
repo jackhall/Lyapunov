@@ -84,6 +84,18 @@ namespace lyapunov {
 		}
 	};
 
+    // using low-level API for iterator protocol for compatibility with both
+    // python 2 and 3
+    boost::python::object get_next(const boost::python::object& iter) {
+        namespace bp = boost::python;
+        PyObject* next_element = PyIter_Next(iter.ptr());
+        if(next_element == nullptr) {
+            PyErr_SetObject(PyExc_StopIteration, Py_None);
+            bp::throw_error_already_set();
+        }
+        return bp::object(bp::handle<>(next_element));
+    }
+
 	boost::python::object pass_through(const boost::python::object& obj) { return obj; }
     double minimum(double x, double y) {
         if(x>y) return y;
@@ -114,7 +126,7 @@ namespace lyapunov {
 			if(tracking_events) {
 				bp::object event, iter = system.attr("events").attr("__iter__")();
 				for(auto x : event_signs) {
-					event = iter.attr("next")();
+					event = get_next(iter);
 					if(x * bp::extract<num_type>( event() ) < 0) return true;
 				}
 			}
@@ -206,12 +218,16 @@ namespace lyapunov {
 			namespace bp = boost::python;
             //if an event occurred, step through it
             if(saved_information == BOUNDARY) step_across();
+
 			//get time for this next step
+            // this block may throw StopIteration
 			if( next_time_obj.is_none() )
-				next_time_obj = steps.attr("next")(); //may throw StopIteration
+                next_time_obj = get_next(steps);
 			num_type next_time = bp::extract<num_type>(next_time_obj);
+
 			//take the step
 			step(next_time);
+
 			//check for event function sign changes, if any
 			if( events_occurred() ) {
 				auto flagged = find_root();
@@ -254,7 +270,7 @@ namespace lyapunov {
 			bp::list flagged;
 			bp::object event, iter = system.attr("events").attr("__iter__")();
 			for(auto x : event_signs) {
-				event = iter.attr("next")();
+				event = get_next(iter);
 				if(x * bp::extract<num_type>(event()) < 0)
 					flagged.append(event);
 			}
@@ -559,6 +575,7 @@ class_< WRAPPER< STEPPER > >(#STEPPER, init<object, object>()) \
 	.def("reset", &WRAPPER< STEPPER >::reset_with_events) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER >::next) \
+    .def("__next__", &WRAPPER< STEPPER >::next) \
 	.def("use_times", &WRAPPER< STEPPER >::use_times) \
 	.add_property("time_tolerance", &WRAPPER< STEPPER >::get_time_tolerance, &WRAPPER< STEPPER >::set_time_tolerance) \
 	.add_property("system", &WRAPPER< STEPPER >::get_system, &WRAPPER< STEPPER >::set_system) \
@@ -572,6 +589,7 @@ class_< WRAPPER< STEPPER, ORDER, ERROR > >(#STEPPER, init<object, object>()) \
 	.def("reset", &WRAPPER< STEPPER, ORDER, ERROR >::reset_with_events) \
 	.def("__iter__", pass_through) \
 	.def("next", &WRAPPER< STEPPER, ORDER, ERROR >::next) \
+	.def("__next__", &WRAPPER< STEPPER, ORDER, ERROR >::next) \
 	.def("use_times", &WRAPPER< STEPPER, ORDER, ERROR >::use_times) \
 	.add_property("time_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_time_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_time_tolerance) \
 	.add_property("relative_tolerance", &WRAPPER< STEPPER, ORDER, ERROR >::get_relative_tolerance, &WRAPPER< STEPPER, ORDER, ERROR >::set_relative_tolerance) \
