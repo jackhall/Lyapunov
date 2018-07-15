@@ -1,21 +1,8 @@
 /*
 	Lyapunov: a library for integrating nonlinear dynamical systems
-	Copyright (C) 2013  John Wendell Hall
+	Copyright (C) 2013-2018  John Hall
 
-	This program is free software: you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program.  If not, see <http://www.gnu.org/licenses/>.
-	
-	The author may be reached at jackhall@utexas.edu.
+	The author may be reached at jackwhall7@gmail.com.
 */
 
 #include <cmath>
@@ -30,13 +17,13 @@
 //#include <boost/numeric/odeint/stepper/runge_kutta_fehlberg78.hpp>
 
 namespace lyapunov {
-	
+
 	void NotImplementedError() {
-		PyErr_SetString(PyExc_NotImplementedError, "Feature not provided."); 
+		PyErr_SetString(PyExc_NotImplementedError, "Feature not provided.");
 		boost::python::throw_error_already_set();
 	}
-	void LengthError() { 
-		PyErr_SetString(PyExc_IndexError, "List lengths don't match."); 
+	void LengthError() {
+		PyErr_SetString(PyExc_IndexError, "List lengths don't match.");
 		boost::python::throw_error_already_set();
 	}
 	void RuntimeError(const char* error_string) {
@@ -47,8 +34,8 @@ namespace lyapunov {
 		PyErr_SetString(PyExc_ValueError, error_string);
 		boost::python::throw_error_already_set();
 	}
-	void StopIteration() { 
-		PyErr_SetString(PyExc_StopIteration, "Simulation finished."); 
+	void StopIteration() {
+		PyErr_SetString(PyExc_StopIteration, "Simulation finished.");
 		boost::python::throw_error_already_set();
 	}
 
@@ -68,13 +55,13 @@ namespace lyapunov {
 			using namespace boost::python;
 			list new_tuple; //is there a way around this list middle stage?
 			for(auto i : x) new_tuple.append(i);
-			return incref(tuple(new_tuple).ptr()); 
+			return incref(tuple(new_tuple).ptr());
 		}
 	};
 	struct vector_from_python_tuple {
 		vector_from_python_tuple() {
 			using namespace boost::python;
-			converter::registry::push_back(&convertible, &construct, 
+			converter::registry::push_back(&convertible, &construct,
 										   type_id<std::vector<double>>());
 		}
 
@@ -91,14 +78,14 @@ namespace lyapunov {
 			void* storage = ((converter::rvalue_from_python_storage< std::vector<double> >*)data)->storage.bytes;
 			new (storage) std::vector<double>(length);
 			for(unsigned int i=0; i<length; ++i)
-				static_cast< std::vector<double>* >(storage)->at(i) 
+				static_cast< std::vector<double>* >(storage)->at(i)
 					= PyFloat_AsDouble(PyTuple_GetItem(obj_ptr, i));
 			data->convertible = storage;
 		}
 	};
 
 	boost::python::object pass_through(const boost::python::object& obj) { return obj; }
-    double minimum(double x, double y) { 
+    double minimum(double x, double y) {
         if(x>y) return y;
         else return x;
     }
@@ -106,7 +93,7 @@ namespace lyapunov {
         if(x<y) return y;
         else return x;
     }
-	
+
 	//should step_across, next, and set_events be redefined for multistepper? probably
 	//use bp::arg for keyword arguments
 	class stepper_wrapper {
@@ -119,7 +106,7 @@ namespace lyapunov {
 
 		boost::python::object system, steps, next_time_obj;
 		state_type temporary, saved_state, event_signs;
-		num_type saved_time; 
+		num_type saved_time;
 		stepper_state_type saved_information;
 		std::function<void(const state_type&, state_type&, num_type)> system_function;
 		bool events_occurred() const {
@@ -130,7 +117,7 @@ namespace lyapunov {
 					event = iter.attr("next")();
 					if(x * bp::extract<num_type>( event() ) < 0) return true;
 				}
-			} 
+			}
 			return false;
 		}
 		void update_signs() {
@@ -151,30 +138,30 @@ namespace lyapunov {
 			saved_state = bp::extract<state_type>(state_tup[1]);
 			saved_information = LAST;
 		}
-		
+
 	public:
 		num_type time_tolerance;
 		bool tracking_events;
 
 		stepper_wrapper() = delete;
-		stepper_wrapper(boost::python::object sys, 
+		stepper_wrapper(boost::python::object sys,
 					    boost::python::object time)
-			: system(sys), 
-			  steps(), 
-			  next_time_obj(), 
+			: system(sys),
+			  steps(),
+			  next_time_obj(),
 			  temporary( boost::python::len(sys.attr("state")[1]) ),
 			  saved_state( temporary.size() ),
 			  event_signs(),
 			  saved_time(0.0),
 			  saved_information(NOTHING),
-			  system_function([this](const state_type& x, state_type& dx, const num_type t) { 
+			  system_function([this](const state_type& x, state_type& dx, const num_type t) {
                   namespace bp = boost::python;
                   system.attr("state") = bp::make_tuple(t, x);
                   dx = bp::extract<state_type>(system()); } ),
 			  time_tolerance(0.00001), //10 microseconds
 			  tracking_events(true) {
 			use_times(time);
-			update_signs(); 
+			update_signs();
 		}
 		virtual void step(num_type next_time) = 0;
 		virtual void step_back() {
@@ -187,19 +174,19 @@ namespace lyapunov {
             reset();
             update_signs();
         }
-		virtual void reset() { 
-            saved_information = NOTHING; 
+		virtual void reset() {
+            saved_information = NOTHING;
         }
-		void step_across(boost::python::object new_state = boost::python::object()) { 
+		void step_across(boost::python::object new_state = boost::python::object()) {
 			namespace bp = boost::python;
 			if(saved_information != BOUNDARY) RuntimeError("No boundary to step across.");
 			bp::object state_tup;
 			if(new_state.is_none()) state_tup = bp::make_tuple(saved_time, saved_state);
 			else state_tup = bp::make_tuple(saved_time, new_state);
 			system.attr("state") = state_tup;
-			reset_with_events(); 
+			reset_with_events();
 		}
-		num_type get_step_size() const { 
+		num_type get_step_size() const {
 			namespace bp = boost::python;
 			if(saved_information != LAST) RuntimeError("Last state not saved.");
 			return bp::extract<num_type>(system.attr("state")[0]) - saved_time;
@@ -212,7 +199,7 @@ namespace lyapunov {
 		boost::python::object get_system() const { return system; }
 		void set_system(boost::python::object new_system) { system = new_system; }
 		void use_times(boost::python::object time) {
-			steps = time.attr("__iter__")(); 
+			steps = time.attr("__iter__")();
 			next_time_obj = boost::python::object();
 		}
 		boost::python::object next() {
@@ -220,7 +207,7 @@ namespace lyapunov {
             //if an event occurred, step through it
             if(saved_information == BOUNDARY) step_across();
 			//get time for this next step
-			if( next_time_obj.is_none() ) 
+			if( next_time_obj.is_none() )
 				next_time_obj = steps.attr("next")(); //may throw StopIteration
 			num_type next_time = bp::extract<num_type>(next_time_obj);
 			//take the step
@@ -242,13 +229,13 @@ namespace lyapunov {
 			namespace bp = boost::python;
 
 			//initialize interval and step size goal
-			Interval interval = {saved_time, 
+			Interval interval = {saved_time,
 								 bp::extract<num_type>(system.attr("state")[0]) };
 
 			//Revert (need to be able to step back across the boundary)
 			step_back();
 
-			//main rootfinding loop	
+			//main rootfinding loop
 			while(interval.length() > time_tolerance) {
 				//step to midpoint of interval
 				step(interval.midpoint());
@@ -268,7 +255,7 @@ namespace lyapunov {
 			bp::object event, iter = system.attr("events").attr("__iter__")();
 			for(auto x : event_signs) {
 				event = iter.attr("next")();
-				if(x * bp::extract<num_type>(event()) < 0) 
+				if(x * bp::extract<num_type>(event()) < 0)
 					flagged.append(event);
 			}
 			step_back();
@@ -277,7 +264,7 @@ namespace lyapunov {
 			saved_time = across_time;
 			saved_state = std::move(across_state);
 			saved_information = BOUNDARY;
-			return flagged; 
+			return flagged;
 		}
 		boost::python::str get_status() const {
 			switch(saved_information) {
@@ -303,15 +290,15 @@ namespace lyapunov {
 	public:
 		variable_stepper_wrapper() = delete;
 		variable_stepper_wrapper(boost::python::object sys,
-								 boost::python::object time) 
-			: base_type(sys, boost::python::list()), 
+								 boost::python::object time)
+			: base_type(sys, boost::python::list()),
 			  absolute_tolerance(0.000001),
 			  relative_tolerance(0.001),
 			  temporary(saved_state.size()),
 			  current_state(saved_state.size()),
 			  error(saved_state.size()),
 	   		  step_size(-1), //default, a flag to recompute
-	   		  final_time(0.0), 
+	   		  final_time(0.0),
               final_time_reached(false) {
 			use_times(time);
 		}
@@ -337,7 +324,7 @@ namespace lyapunov {
 				steps = boost::python::object();
 				final_time = bp::extract<num_type>(time);
                 if(step_size < 0) {
-				    step_size = 0.001*(final_time - 
+				    step_size = 0.001*(final_time -
 							bp::extract<num_type>(system.attr("state")[0]));
                 }
 			} else base_type::use_times(time);
@@ -353,7 +340,7 @@ namespace lyapunov {
 			}
             return error_index;
         }
-		virtual void increase_step(num_type error_index) = 0; 		
+		virtual void increase_step(num_type error_index) = 0;
         virtual bool decrease_step(num_type error_index, num_type original_step_size) = 0;
 		bool adjust_step(num_type error_index, num_type original_step_size) {
 			increase_step(error_index);
@@ -369,29 +356,29 @@ namespace lyapunov {
 				while(!step_successful) {
                     try_free_step(step_size);
 				    current_step_size = step_size;
-                   	error_index = compute_error_index(); 
-					step_successful = adjust_step(error_index, step_size); 
+                   	error_index = compute_error_index();
+					step_successful = adjust_step(error_index, step_size);
 				}
 			} else {
 				current_step_size = final_time - saved_time;
                 final_time_reached = true;
 				while(!step_successful) {
                     try_free_step(current_step_size);
-				    error_index = compute_error_index(); 
-					step_successful = decrease_step(error_index, current_step_size); 
+				    error_index = compute_error_index();
+					step_successful = decrease_step(error_index, current_step_size);
                     if(!step_successful) {
                         current_step_size = step_size;
                         final_time_reached = false;
                     }
 				}
 			}
-			system.attr("state") = bp::make_tuple(saved_time + current_step_size, 
+			system.attr("state") = bp::make_tuple(saved_time + current_step_size,
 												  temporary);
 		}
 		virtual void step(num_type next_time) {
 			namespace bp = boost::python;
 			save_last();
-			auto current_time = saved_time; 
+			auto current_time = saved_time;
             current_state = saved_state;
 			num_type current_step_size, error_index=0.0;
 			if(step_size < 0) step_size = next_time - current_time;
@@ -406,7 +393,7 @@ namespace lyapunov {
 					current_step_size = step_size;
 					last_step = false;
 				} else last_step = true; //problem here?
-			    
+
                 try_step(current_time, current_step_size);
                	error_index = compute_error_index();
 
@@ -439,8 +426,8 @@ namespace lyapunov {
 			} else {
 				return base_type::next();
 			}
-		}	
-	};	
+		}
+	};
 	template<typename stepper_type>
 	class simple_stepper_instance : public stepper_wrapper {
 		stepper_type stepper;
@@ -450,10 +437,10 @@ namespace lyapunov {
 		void step(num_type next_time) {
 			save_last();
 			namespace bp = boost::python;
-			stepper.do_step(system_function, 
-							saved_state, 
-							saved_time, 
-							temporary, 
+			stepper.do_step(system_function,
+							saved_state,
+							saved_time,
+							temporary,
 							next_time - saved_time); //(sys, xin, tin, xout, h)
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
@@ -461,17 +448,17 @@ namespace lyapunov {
 	template<typename stepper_type>
 	class simple_multistepper_instance : public stepper_wrapper {
 		stepper_type stepper;
-	
+
 	public:
 		using stepper_wrapper::stepper_wrapper;
 		//'step' method is duplicated in simple_stepper_instance
 		void step(num_type next_time) {
 			save_last();
 			namespace bp = boost::python;
-			stepper.do_step(system_function, 
-							saved_state, 
-							saved_time, 
-							temporary, 
+			stepper.do_step(system_function,
+							saved_state,
+							saved_time,
+							temporary,
 							next_time - saved_time); //(sys, xin, tin, xout, h)
 			system.attr("state") = bp::make_tuple(next_time, temporary);
 		}
@@ -514,7 +501,7 @@ namespace lyapunov {
 							pow(error_index, -1.0/(error_order - 1.0)));
 				step_size = maximum(step_size, time_tolerance);
 				return false;
-			} 
+			}
 			return true;
 		}
 	};
@@ -553,7 +540,7 @@ namespace lyapunov {
 							pow(error_index, -1.0/(error_order - 1.0)));
 				step_size = maximum(step_size, time_tolerance);
 				return false;
-			} 
+			}
 			return true;
 		}
 		virtual void reset() {
@@ -645,8 +632,7 @@ BOOST_PYTHON_MODULE(solvers) {
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_moulton)
 	//ode::adams_bashforth_moulton lacks a reset method for some reason (a bug?)
 	//LYAPUNOV_EXPOSE_VARIABLE_ORDER_STEPPER(adams_bashforth_moulton)
-	
+
 	//think about Bulirsch-Stoer solver too!
 	//write a dense_stepper_wrapper?
 }
-

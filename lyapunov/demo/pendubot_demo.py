@@ -1,5 +1,10 @@
 #!/usr/bin/python
 
+#Lyapunov: a library for integrating nonlinear dynamical systems
+#Copyright (C) 2013-2018 John Wendell Hall
+#
+#The author may be reached at jackwhall7@gmail.com.
+
 import math
 import numpy, numpy.linalg
 import sympy as sym
@@ -113,3 +118,7 @@ def run_pendubot_demo():
     print("b1 ~=", observer.state.x[-2])
     print("b2 ~=", observer.state.x[-1])
     return record
+
+
+if __name__ == "__main__":
+    run_pendubot_demo()
