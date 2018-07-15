@@ -10,7 +10,7 @@ import lyapunov
 
 class Reader(object):
     def __init__(self, filename):
-        data = numpy.loadtxt(filename, 
+        data = numpy.loadtxt(filename,
                              usecols=range(5))
         rows = data.shape[0]
         self.time_data = numpy.linspace(0, rows*0.01, rows)
@@ -47,9 +47,9 @@ class Observer(object):
         theta1, theta2, h1, h2, b1, b2 = sym.symbols("theta1 theta2 h1 h2 b1 b2")
         statelist = [theta1, theta2, h1, h2, b1, b2]
         theta1dot = h1 / (m1*l1**2 + J1)
-        theta2dot = (h2 - (m2*L1*(L1 + l2*sym.cos(theta2)) + J2)*theta1dot) / (J2 
+        theta2dot = (h2 - (m2*L1*(L1 + l2*sym.cos(theta2)) + J2)*theta1dot) / (J2
                     + m2*l2*sym.cos(theta2)*(L1 + l2*sym.cos(theta2)))
-        h1dot = m1*g*l1*sym.sin(theta1) + m2*g*(L1*sym.sin(theta1) 
+        h1dot = m1*g*l1*sym.sin(theta1) + m2*g*(L1*sym.sin(theta1)
                 + l2*sym.sin(theta1+theta2)) - b1*theta1dot
         h2dot = m2*g*l2*sym.sin(theta1+theta2) - b2*theta2dot
         self.xsym = sym.Matrix(statelist)
@@ -69,7 +69,7 @@ class Observer(object):
         self.desired_coefficients = numpy.array([[729], [1458], [1215], [540], [135], [18]])
         char_poly = (sym.symbols("_lambda")*sym.eye(6) - A).det_bareis()
         char_poly = [char_poly.coeff("_lambda", index) for index in range(6)]
-        char_poly = sym.Matrix([[sym.diff(row, var) for var in A[:,0]] 
+        char_poly = sym.Matrix([[sym.diff(row, var) for var in A[:,0]]
                                                     for row in char_poly])
         char_poly = sym.lambdify((j,k,l,m,n,p,q,r), char_poly)
         self.char_poly = lambda x: numpy.matrix(char_poly(*x))
@@ -77,10 +77,10 @@ class Observer(object):
     def __call__(self):
         dfeval = self.df(*self.state.x)
         #bind current values of df to charateristic polynomial
-        gradientsubs = (dfeval[0,2], dfeval[1,2], dfeval[1,3], dfeval[2,2], 
+        gradientsubs = (dfeval[0,2], dfeval[1,2], dfeval[1,3], dfeval[2,2],
                         dfeval[2,4], dfeval[3,2], dfeval[3,3], dfeval[3,5])
         char_poly = self.char_poly(gradientsubs)
-        if numpy.linalg.cond(char_poly) < 1000: 
+        if numpy.linalg.cond(char_poly) < 1000:
             col1 = numpy.linalg.solve(char_poly, self.desired_coefficients)
             L = [[-col1[0], 1],
                  [-col1[1], 1 - dfeval[1,1]],
@@ -103,14 +103,13 @@ def run_pendubot_demo():
     observer = Observer(reader.theta)
     pendubot = lyapunov.ParallelSystems([reader, observer])
     observer.y = reader.theta
-    observer.state = 0.0, reader.theta() + (0.1, 0.1) + (0.1, 0.1) 
+    observer.state = 0.0, reader.theta() + (0.1, 0.1) + (0.1, 0.1)
 
     record = lyapunov.Recorder(pendubot)
     stepper = lyapunov.adams_bashforth4(pendubot, reader.time_data)
     for t, _ in stepper:
         record.log()
 
-    print "b1 ~=", observer.state.x[-2]
-    print "b2 ~=", observer.state.x[-1]
+    print("b1 ~=", observer.state.x[-2])
+    print("b2 ~=", observer.state.x[-1])
     return record
-

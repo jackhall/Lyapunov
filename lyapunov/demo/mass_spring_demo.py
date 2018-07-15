@@ -45,20 +45,20 @@ def print_two_steps(system = MassSpringDemo()):
     """ System must make use of lyapunov.State. """
     t_in = [0.1, 0.2]
     stepper = lyapunov.euler(system, t_in)
-    print "No Events - mass spring damper systemtem"
-    print "Step 0:"
-    print "time", system.state.t, "| state ", system.state.x
-    print "slope", system()
+    print("No Events - mass spring damper system")
+    print("Step 0:")
+    print("time", system.state.t, "| state ", system.state.x)
+    print("slope", system())
 
     stepper.next()
-    print "Step 1:"
-    print "time", system.state.t, "| state ", system.state.x
-    print "slope", system()
+    print("Step 1:")
+    print("time", system.state.t, "| state ", system.state.x)
+    print("slope", system())
 
     stepper.next()
-    print "Step 2:"
-    print "time", system.state.t, "| state ", system.state.x
-    print "slope", system()
+    print("Step 2:")
+    print("time", system.state.t, "| state ", system.state.x)
+    print("slope", system())
 
 
 class SubsystemDemo(lyapunov.ParallelSystems):
@@ -70,8 +70,8 @@ class SubsystemDemo(lyapunov.ParallelSystems):
         self.control.y = lambda: self.plant.state[1]
         self.control.r = lambda: self.reference.value
         self.plant.u = self.control.u
-        lyapunov.ParallelSystems.__init__(self, [self.reference, 
-                                                 self.control, 
+        lyapunov.ParallelSystems.__init__(self, [self.reference,
+                                                 self.control,
                                                  self.plant])
 
 
@@ -81,8 +81,8 @@ def run_subsystem_demo():
     stepper = lyapunov.adams_bashforth3(system, numpy.linspace(0.0, 8.0, 100))
     #stepper = lyapunov.cash_karp(system, 8.0)
 
-    print "\nMass-Spring-Damper w/PID control"
-    print "initial state", system.state
+    print("\nMass-Spring-Damper w/PID control")
+    print("initial state", system.state)
     start = time.clock()
     count = 0
     for t, events in stepper:
@@ -90,10 +90,9 @@ def run_subsystem_demo():
             stepper.step_across()
             system.reference.update()
         record.log(events)
-    print "time elapsed", time.clock() - start
+    print("time elapsed", time.clock() - start)
 
     x_out = numpy.array(record.x)
     plt.figure()
     plt.plot(x_out[:,0], x_out[:,1])
     plt.show()
-

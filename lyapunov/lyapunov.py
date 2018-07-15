@@ -1,25 +1,25 @@
 #!/usr/bin/env python
 """
-    Lyapunov is a toolbox for integrating dynamical systems. Integration of 
-    ordinary equations is done with solvers from boost.numeric.odeint, wrapped 
+    Lyapunov is a toolbox for integrating dynamical systems. Integration of
+    ordinary equations is done with solvers from boost.numeric.odeint, wrapped
     using boost.python.
 
-    Instead of treating systems as functions, Lyapunov represents systems as 
-    objects. This not only significantly cleans up the solver interface, but it 
-    also gives the user more control over the simulation and encourages a cleaner 
-    coding style. There is a Tutorial, and the "demo/" directory contains several 
+    Instead of treating systems as functions, Lyapunov represents systems as
+    objects. This not only significantly cleans up the solver interface, but it
+    also gives the user more control over the simulation and encourages a cleaner
+    coding style. There is a Tutorial, and the "demo/" directory contains several
     working demonstrations of the library interface.
 
-    This reference starts with a function interview and then moves on to a 
+    This reference starts with a function interview and then moves on to a
     detailed description of the library as a set of interface concepts.
 
     **Exposed Classes and Functions**
 
-    Each of these stepper classes uses a different numerical solver. The low-level 
-    numerical routines are taken from boost.numeric.odeint (a widely available C++ 
-    library) and wrapped using boost.python. Documentation for steppers is general 
-    - all steppers are used similarly, but here is an overview. The first four 
-    stepper classes implement fixed_step algorithms. Note: the order of a solver 
+    Each of these stepper classes uses a different numerical solver. The low-level
+    numerical routines are taken from boost.numeric.odeint (a widely available C++
+    library) and wrapped using boost.python. Documentation for steppers is general
+    - all steppers are used similarly, but here is an overview. The first four
+    stepper classes implement fixed_step algorithms. Note: the order of a solver
     is a measure of how fast numerical error accumulates in the solution.
 
         euler - First-order solver useful mostly for demonstration purposes
@@ -27,31 +27,31 @@
         runge_kutta4 - Commonly used fourth-order solver
         adams_bashforth* - Multistep algorithms - good for expensive system calls
 
-    These next three include step size control. Each solver provides an 
-    approximate measure of the error accrued in each step, allowing Lyapunov to 
-    adjust the step size in response. They can also emulate fixed-step solutions 
+    These next three include step size control. Each solver provides an
+    approximate measure of the error accrued in each step, allowing Lyapunov to
+    adjust the step size in response. They can also emulate fixed-step solutions
     without sacrificing error control, in exchange for a little speed.
 
         cash_karp - A fifth-order RK solver with fourth-order error estimation
-        dormand_prince - Another fifth-order RK method with fourth-order error 
+        dormand_prince - Another fifth-order RK method with fourth-order error
                  estimation - has internal state
         fehlberg87 - An eighth-order RK solver with seventh-order error estimation
 
-    These utilities should help the user adhere to the system concept without 
-    sacrificing convenience or coding style. In particular it should be easy to 
+    These utilities should help the user adhere to the system concept without
+    sacrificing convenience or coding style. In particular it should be easy to
     recursively nest subsystems.
 
-        ParallelSystems - A container and manager for subsystems, itself a full 
+        ParallelSystems - A container and manager for subsystems, itself a full
                           system
         ParallelEvents - A generator to chain together subsystem event iterables
-        State - A namedtuple to help with the interface to system objects: 't' 
+        State - A namedtuple to help with the interface to system objects: 't'
                 for element 0 and 'x' for element 1
         state_property - Returns a convenient property that acts like a State
-        systemfunctor - A class decorator that modifies a system for compatibility 
+        systemfunctor - A class decorator that modifies a system for compatibility
                         with SciPy
 
-    Lyapunov provides some commonly used subsystem classes. The signal classes 
-    have no state and are completely time-dependent. Feel free to submit pull 
+    Lyapunov provides some commonly used subsystem classes. The signal classes
+    have no state and are completely time-dependent. Feel free to submit pull
     requests if you write a subsystem you like!
 
         Filter - A linear filter of arbitrary order
@@ -59,67 +59,67 @@
         StepSignal - Generates a step signal
         SquareWave - Generates a square wave
         SineWave - Generates a sinusoid
-        ChirpSignal - Generates a sinusoid with an arbitrary instantaneous 
+        ChirpSignal - Generates a sinusoid with an arbitrary instantaneous
                       frequency
 
-    These utilities provide shortcuts for general use in simulations. Again, feel 
+    These utilities provide shortcuts for general use in simulations. Again, feel
     free to submit your own code!
 
         Recorder - A way to track and later plot system state and arbitrary data
-        check_NaN - Function that takes a system and raises an ArithmeticError if 
+        check_NaN - Function that takes a system and raises an ArithmeticError if
                     any states have been corrupted
 
     **System Objects**
 
-    System objects must provide a state attribute that is a tuple (t, x) where t 
-    is the current system time and x is a tuple of the current system state values. 
-    Lyapunov uses tuples because they are immutable; if state was mutable then it 
-    could be changed without explicitly assigning it to the system, which would 
-    undermine the use of a state descriptor and potentially violate numerical 
-    assumptions of continuity. To avoid the need to access time and state by index 
-    - which would be ugly - Lyapunov provides a state_property descriptor that acts 
+    System objects must provide a state attribute that is a tuple (t, x) where t
+    is the current system time and x is a tuple of the current system state values.
+    Lyapunov uses tuples because they are immutable; if state was mutable then it
+    could be changed without explicitly assigning it to the system, which would
+    undermine the use of a state descriptor and potentially violate numerical
+    assumptions of continuity. To avoid the need to access time and state by index
+    - which would be ugly - Lyapunov provides a state_property descriptor that acts
     like a namedtuple.
 
-    A system must also behave like an arity-zero function. The value returned from 
-    calling the system should be a tuple of floats corresponding to state 
-    derivatives; states and derivatives should be mapped one-to-one. The 
-    derivatives should be a continuous function of only state and time. This rule 
+    A system must also behave like an arity-zero function. The value returned from
+    calling the system should be a tuple of floats corresponding to state
+    derivatives; states and derivatives should be mapped one-to-one. The
+    derivatives should be a continuous function of only state and time. This rule
     may be violated when an event occurs, however.
 
-    When an event does occur, altering the system object directly is fair game. 
-    This is a bad idea during normal integration because such changes are 
-    generally discontinuous, but an event tells the stepper to expect 
-    discontinuity. For instance, you may alter the system's events attribute as 
-    you please, or change the state equations. If you wish to set a new state, 
-    use the step_across method; otherwise this particular type of change will be 
-    forgotten when solving continues. For now, do not change the number of states 
+    When an event does occur, altering the system object directly is fair game.
+    This is a bad idea during normal integration because such changes are
+    generally discontinuous, but an event tells the stepper to expect
+    discontinuity. For instance, you may alter the system's events attribute as
+    you please, or change the state equations. If you wish to set a new state,
+    use the step_across method; otherwise this particular type of change will be
+    forgotten when solving continues. For now, do not change the number of states
     a system has. Later I may add support for resizing the state tuple.
 
-    Specify events through a system object's events attribute - an iterable of 
-    arity-zero functions or functors. A discrete event occurs when one or more of 
-    these event functions changes sign. As with the state derivatives, the value 
-    of an event function should be unique given system state and time. Lyapunov's 
-    bisection method does not currently require event functions to be continuous, 
+    Specify events through a system object's events attribute - an iterable of
+    arity-zero functions or functors. A discrete event occurs when one or more of
+    these event functions changes sign. As with the state derivatives, the value
+    of an event function should be unique given system state and time. Lyapunov's
+    bisection method does not currently require event functions to be continuous,
     but this may change with the addition of a more advanced rootfinder.
 
-    Many of these rules may seem overly restrictive, but they actually apply to 
-    any numerical integration algorithms you've used before. I may simply be more 
-    meticulous about including them in documentation. Lyapunov is designed with 
-    the Zen of Python in mind: "There should only be one obvious way to do it." 
-    State integration and events are orthogonal features, respectively 
-    representing continuous and discrete behavior. Using them as such will give 
+    Many of these rules may seem overly restrictive, but they actually apply to
+    any numerical integration algorithms you've used before. I may simply be more
+    meticulous about including them in documentation. Lyapunov is designed with
+    the Zen of Python in mind: "There should only be one obvious way to do it."
+    State integration and events are orthogonal features, respectively
+    representing continuous and discrete behavior. Using them as such will give
     you the best results.
 
-    Many of these rules loosen their grip where subsystems are concerned. For 
-    instance, grouping subsystems together in an object-oriented way makes little 
-    sense unless they are coupled, in which case their behavior is no longer 
-    purely a function of their state and time. This is perfectly fine so long as 
-    the supersystem - the system object directly managed by the stepper - does 
-    follow the rules. In particular, callbacks provide a useful way of passing 
-    information back and forth as long as no information outside the supersystem 
-    is used to determine behavior. Make sure your subsystems are properly 
-    encapsulated. Lyapunov provides several classes that make nesting system 
-    objects much easier. 
+    Many of these rules loosen their grip where subsystems are concerned. For
+    instance, grouping subsystems together in an object-oriented way makes little
+    sense unless they are coupled, in which case their behavior is no longer
+    purely a function of their state and time. This is perfectly fine so long as
+    the supersystem - the system object directly managed by the stepper - does
+    follow the rules. In particular, callbacks provide a useful way of passing
+    information back and forth as long as no information outside the supersystem
+    is used to determine behavior. Make sure your subsystems are properly
+    encapsulated. Lyapunov provides several classes that make nesting system
+    objects much easier.
 
     **Planned Features**
 
@@ -166,43 +166,44 @@ class ParallelSystems(object):
     """
     A container/manager for subsystems, itself a system.
 
-    ParallelSystems acts as an aggregate of other objects which implement 
-    some or all of the system concept. All subsystems are expected to have a 
-    `state` tuple attribute as in `(t, x)`, but the 'x' member may be an empty 
-    tuple if the subsystem has no state. Such subsystems do not need to be 
-    callable, but all others are. Each subsystem object must still map states 
+    ParallelSystems acts as an aggregate of other objects which implement
+    some or all of the system concept. All subsystems are expected to have a
+    `state` tuple attribute as in `(t, x)`, but the 'x' member may be an empty
+    tuple if the subsystem has no state. Such subsystems do not need to be
+    callable, but all others are. Each subsystem object must still map states
     and derivatives one-to-one.
 
     Events are represented by an instance of ParallelEvents.
 
-    You may find it convenient to implement most supersystems by deriving from 
-    ParallelEvents and simply extending `__init__`.  If so, make sure to call 
-    the original `ParallelSystems.__init__` during initialization. 
+    You may find it convenient to implement most supersystems by deriving from
+    ParallelEvents and simply extending `__init__`.  If so, make sure to call
+    the original `ParallelSystems.__init__` during initialization.
     """
     def __init__(self, sys_list):
         """
-        Initialize with an iterable of the subsystems you wish to manage. 
-        
+        Initialize with an iterable of the subsystems you wish to manage.
+
         Usage: ParallelSystems(subsystem_sequence)
-        
-        The order in which subsystems are given will determine in which order 
-        state is accessed and the subsystems are called. ParallelSystems will 
-        print a warning if the subsystems are not time-synchronized. In the 
-        case of conflict, it will always take the current time of the first 
-        subsystem to be the correct value. If any of the systems have state 
+
+        The order in which subsystems are given will determine in which order
+        state is accessed and the subsystems are called. ParallelSystems will
+        print a warning if the subsystems are not time-synchronized. In the
+        case of conflict, it will always take the current time of the first
+        subsystem to be the correct value. If any of the systems have state
         but are not callable, `__init__` will raise a NotImplementedError.
         """
-        self._subsystems = list(sys_list) #use an OrderedDict?
+        self._subsystems = list(sys_list)  #use an OrderedDict?
         self._dof = [len(sys.state[1]) for sys in sys_list]
         self._time = sys_list[0].state[0]
         self.events = ParallelEvents(sys_list)
         if not self.are_synchronized():
-            print "Subsystem times aren't synchronized yet."
+            print("Subsystem times aren't synchronized yet.")
+
         #Check to make sure that any system that has state is callable.
         for dof, can_call in zip(self._dof, map(callable, sys_list)):
             if dof > 0 and not can_call:
-                raise NotImplementedError("Systems with states " 
-                        + "should be callable")
+                raise NotImplementedError("Systems with states should be"
+                                          "callable")
 
     def __call__(self):
         """
@@ -210,48 +211,47 @@ class ParallelSystems(object):
         """
         call_iter = it.ifilter(callable, self._subsystems)
         return tuple(
-                 it.chain.from_iterable(
-                   sys() for sys in call_iter))
+            it.chain.from_iterable(sys() for sys in call_iter)
+        )
 
     @property
     def state(self):
         """
-        Collect state tuples from each subsystem in order and concatenate them. 
-        For the time element it will return an internal time attribute as 
-        initialized from the first subsystem. 
+        Collect state tuples from each subsystem in order and concatenate them.
+        For the time element it will return an internal time attribute as
+        initialized from the first subsystem.
         """
-        return State(self._time, 
-                     tuple(it.chain.from_iterable(
-                             sys.state[1] for sys in self._subsystems)))
+        x = it.chain.from_iterable(sys.state[1] for sys in self._subsystems)
+        return State(self._time, tuple(x))
 
     @state.setter
     def state(self, t_x):
         """
-        Slice the given state tuple according to how many states each 
-        subsystem had when `ParallelSystems` was initialized. The given time 
-        will be written to each subsystem. Thus setting `state` will always 
-        result in synchronized subsystems - time is not relative. 
+        Slice the given state tuple according to how many states each
+        subsystem had when `ParallelSystems` was initialized. The given time
+        will be written to each subsystem. Thus setting `state` will always
+        result in synchronized subsystems - time is not relative.
         """
         self._time, x = t_x
         a = 0
         if sum(self._dof) != len(x):
             raise IndexError("Length of state tuples don't match")
         for dof, sys in it.izip(self._dof, self._subsystems):
-            b = a + dof 
+            b = a + dof
             sys.state = self._time, x[a:b]
             a = b
 
     def are_synchronized(self, index=None):
         """
         Return false if any subsystems do not match the instance's internal
-        record of time. Specifying an index will check only the indexed 
+        record of time. Specifying an index will check only the indexed
         subsystem.
 
         Usage: sync_bool = systems.are_synchronized()
                synv_bool = systems.are_synchronized(index)
         """
         if index is None:
-            return not any(sys.state[0] != self._time 
+            return not any(sys.state[0] != self._time
                            for sys in self._subsystems)
         else:
             return self._subsystems[index].state[0] == self._time
@@ -281,10 +281,11 @@ class ParallelSystems(object):
         """
         if len(new_system.state[1]) > 0 and not callable(new_system):
             raise NotImplementedError("Systems with states should be callable")
+
         self._subsystems.insert(index, new_system)
         self._dof.insert(index, len(new_system.state[1]))
         if not self.are_synchronized(index):
-            print "warning - forced to synchronize new subsystem"
+            print("warning - forced to synchronize new subsystem")
             self.synchronize(index)
 
     def remove_subsystem(self, index):
@@ -299,13 +300,13 @@ class ParallelSystems(object):
 
 
 class ParallelEvents(object):
-    """ 
-    An iterable that chains together subsystem `events` iterables. 
+    """
+    An iterable that chains together subsystem `events` iterables.
 
-    `ParallelEvents` stores references to the subsystem objects, not whatever 
-    object is bound to their `events` attributes. This makes updating 
-    subsystem event iterables much easier, but note that this class will not 
-    recheck for an `events` attribute after being initialized. If you want to 
+    `ParallelEvents` stores references to the subsystem objects, not whatever
+    object is bound to their `events` attributes. This makes updating
+    subsystem event iterables much easier, but note that this class will not
+    recheck for an `events` attribute after being initialized. If you want to
     rerun this check, create a new instance.
 
     Remember that each event should be callable with no arguments.
@@ -327,8 +328,8 @@ class ParallelEvents(object):
         self._subsystems = filter(has_events, sys_list)
 
     def __len__(self):
-        """ 
-        Sum the lengths of constituent event iterables. Will throw if any of 
+        """
+        Sum the lengths of constituent event iterables. Will throw if any of
         them lack `__len__`.
         """
         return sum(len(sys.events) for sys in self._subsystems)
@@ -343,18 +344,18 @@ class ParallelEvents(object):
 
 
 def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):
-    """ 
+    """
     Returns a property that acts like a `State` namedtuple. Regarless of what
     kind of tuple is assigned to it, this property will always yield a suitable
     namedtuple when accessed. The zeroth element of `State` can be referred to
     as `t` and the first as `x`.
 
-    The elements are actually stored in attributes of the system instance. The 
+    The elements are actually stored in attributes of the system instance. The
     name of each attribute is mangled by default, but you can specify you own
-    names for convenience. If you do choose your own names, treat those 
+    names for convenience. If you do choose your own names, treat those
     attributes as read-only.
 
-    Usage: 
+    Usage:
         class System(object):
             state = state_property(tname='_lyapunov__t', xname='_lyapunov__x')
     """
@@ -371,33 +372,38 @@ def state_property(tname='_lyapunov__t', xname='_lyapunov__x'):
 def systemfunctor(system):
     """
     Decorator that adds defaulted time and state arguments to a system class
-    or wraps a system function in a system class. 
+    or wraps a system function in a system class.
     This should make it compatible with both Lyapunov and SciPy.
 
-    Like any decorator, systemfunctor may also be used as a function that 
-    takes and returns a class for function. If the given class does not have 
-    `__call__` defined to take no arguments, it will raise a 
+    Like any decorator, systemfunctor may also be used as a function that
+    takes and returns a class for function. If the given class does not have
+    `__call__` defined to take no arguments, it will raise a
     NotImplementedError.
     """
     if inspect.isfunction(system):
         class system_class(object):
             def __init__(self, *parameters):
                 self.parameters = parameters
+
             state = state_property(xname="x", tname="t")
+
             def __call__(self, t=None, x=None):
                 if t is not None and x is not None:
                     self.state = t, x
                 return system(t, x, *self.parameters)
+
         return system_class
+
     else:
         argspec = inspect.getargspec(system.__call__)
         if len(argspec.args) != 1:
             raise NotImplementedError("System __call__ has arity > 0")
-        original_call = system.__call__
+
         def new_call(self, t=None, x=None):
             if t is not None and x is not None:
                 self.state = t, x
-            return original_call(self)
+            return system.__call__(self)
+
         system.__call__ = new_call
         return system
 
@@ -406,20 +412,20 @@ def systemfunctor(system):
 #################
 # Controllers
 class PID(object):
-    """ 
+    """
     A SISO PID controller. I wrote this class mostly to demonstrate how
-    controller states are properly handled. The reference `r` is drawn from 
-    another subsystem (maybe one of the signal objects), and the output `y` 
-    should be drawn from the plant object. Neither of these callbacks has a 
-    default value; they must be set after initialization. 
+    controller states are properly handled. The reference `r` is drawn from
+    another subsystem (maybe one of the signal objects), and the output `y`
+    should be drawn from the plant object. Neither of these callbacks has a
+    default value; they must be set after initialization.
     """
     def __init__(self, Kp=1.0, Ki=0.0, Kd=0.0):
         """
-        Create with linear gains for the proportional, integral, and 
-        derivative terms, in that order. The two callback functions `r` and 
-        `y` are left as None, so remember to set these using another object 
-        before simulating. This may seem strange, but it's natural style for 
-        Lyapunov because otherwise you run into chicken-and-egg problems with 
+        Create with linear gains for the proportional, integral, and
+        derivative terms, in that order. The two callback functions `r` and
+        `y` are left as None, so remember to set these using another object
+        before simulating. This may seem strange, but it's natural style for
+        Lyapunov because otherwise you run into chicken-and-egg problems with
         your subsystems.
 
         Usage: controller = PID([Kp=1.0][, Ki=0.0][, Kd=0.0])
@@ -435,16 +441,16 @@ class PID(object):
         Since the sole state is the value of the integral term, the state
         derivative is simply the error.
         """
-        x, _ = self.y() 
+        x, _ = self.y()
         error = self.r() - x
         return (error,)
 
     def u(self):
         """
-        Returns the control effort for the current error, error derivative, 
-        and error integral. The integral is a controller state, and the other 
-        terms are drawn from the `y` callback. Do not call until the callbacks 
-        are set. 
+        Returns the control effort for the current error, error derivative,
+        and error integral. The integral is a controller state, and the other
+        terms are drawn from the `y` callback. Do not call until the callbacks
+        are set.
         """
         #catch Nonetype exceptions for y and r!
         xi = self.y() #y returns output derivative
@@ -461,7 +467,7 @@ class StepSignal(object):
     Generates a step signal. The step itself is an event that the
     stepper will detect. When the event occurs, call `update` after
     calling `stepper.step_across`. It's important that the StepSignal
-    instance be on the right side of the boundary. See `update` for 
+    instance be on the right side of the boundary. See `update` for
     more information.
 
     `value` is a data attribute set to the current value of the signal.
@@ -479,19 +485,19 @@ class StepSignal(object):
         self.state = 0.0, ()
         self.events = [lambda: step_time - self.time]
         self.update()
-    
+
     state = state_property("time", "_lyapunov__x")
 
     def update(self):
         """
-        Sets `value` according to the current time. Call after 
+        Sets `value` according to the current time. Call after
         stepping through the step event boundary.
         """
         if self.events[0]() > 0:
             self.value = self.initial
         else:
             self.value = self.final
-    
+
 
 class SquareWave(object):
     """
@@ -499,7 +505,7 @@ class SquareWave(object):
     Generates a square wave. The steps themselves are events that the
     stepper will detect. When an event occurs, call `update` after
     calling `stepper.step_across`. It's important that the SquareWave
-    instance be on the right side of the boundary. See `update` for 
+    instance be on the right side of the boundary. See `update` for
     more information.
 
     `value` is a data attribute set to the current value of the signal.
@@ -513,7 +519,7 @@ class SquareWave(object):
         self.epsilon = period / 100
         self.period, self.lower, self.upper = period, y_lower, y_upper
         self.state = 0.0, ()
-        self.events = [lambda: math.sin(2 * math.pi * 
+        self.events = [lambda: math.sin(2 * math.pi *
                                         (self.time + self.epsilon) / period)]
         self.update()
 
@@ -521,9 +527,9 @@ class SquareWave(object):
 
     def update(self):
         """
-        Sets `value` according to the current time. Call after 
+        Sets `value` according to the current time. Call after
         stepping through the step event boundary.
-        """ 
+        """
         if self.events[0]() > 0:
             self.value = self.upper
         else:
@@ -537,7 +543,7 @@ class SineWave(object):
     def __init__(self, frequency=1.0, mean=0.0, amplitude=1.0, phase=0.0):
         """
         Initialize with frequency, DC magnitude, AC magnitude, and phase shift.
-        Frequency is in rad/s, and the phase shift is positive. 
+        Frequency is in rad/s, and the phase shift is positive.
 
         Usage: SineWave(frequency=1.0, mean=0.0, amplitude=1.0, phase=0.0)
         """
@@ -546,11 +552,11 @@ class SineWave(object):
         self.state = 0.0, ()
 
     state = state_property("time", "_lyapunov__x")
-    
+
     @property
     def value(self):
         """ The current value of the signal. """
-        return self.amplitude*math.sin(self.frequency*self.time 
+        return self.amplitude*math.sin(self.frequency*self.time
                 + self.phase) + self.mean
 
 
@@ -559,10 +565,10 @@ class ChirpSignal(object):
     Generates a sinusoid with a time-varying frequency.
     """
     def __init__(self, freq_fcn=None, mean=0.0, amplitude=2.0):
-        """ 
-        Initialize with a function that computes frequency from time, 
-        the DC magnitude, the AC magnitude, and a function that computes 
-        frequency from time. Frequencies are in rad/s. 
+        """
+        Initialize with a function that computes frequency from time,
+        the DC magnitude, the AC magnitude, and a function that computes
+        frequency from time. Frequencies are in rad/s.
 
         Usage: ChirpSignal(freq_fcn=None, mean=0.0, amplitude=2.0)
         """
@@ -584,21 +590,21 @@ class ChirpSignal(object):
 #################
 
 class Filter(object):
-    """ 
-    A linear filter of arbitrary order. It also provides derivative estimates 
-    for otherwise nondifferentiable inputs. The `output` function returns to 
-    the complete signal, including derivatives. The signal is drawn from 
-    another subsystem with the `signal` callback. Make sure to set this before 
+    """
+    A linear filter of arbitrary order. It also provides derivative estimates
+    for otherwise nondifferentiable inputs. The `output` function returns to
+    the complete signal, including derivatives. The signal is drawn from
+    another subsystem with the `signal` callback. Make sure to set this before
     using the filter.
     """
     def __init__(self, gains):
-        """ 
-        Create with an iterable over the coefficients of the filter's 
-        desired characteristic equation. The coefficients should be 
-        normalized; exclude the highest-order coefficient. It is taken to be 
+        """
+        Create with an iterable over the coefficients of the filter's
+        desired characteristic equation. The coefficients should be
+        normalized; exclude the highest-order coefficient. It is taken to be
         one. Order the coefficients from lowest-to-highest order. If you
         know the poles you want, you can simply convolve them into the
-        characteristic equation. 
+        characteristic equation.
         """
         #This way, there's no need to handle complex numbers.
         self._num_states = len(gains)
@@ -613,12 +619,12 @@ class Filter(object):
         """ Set state and computes the only nontrivial derivative. """
         self._time, self._state = t_x
         #parenthesis for (q,d)?
-        self._xndot = sum(-q*d for (q,d) in zip(self._state, self._gains)) 
+        self._xndot = sum(-q*d for (q,d) in zip(self._state, self._gains))
 
     def output(self):
         """
         Returns the current filtered signal and all its derivatives. Meant for
-        use as a callback. 
+        use as a callback.
         """
         return self._state + (self._xndot + self._gains[0]*self.signal(),)
 
@@ -632,31 +638,31 @@ class Recorder(object):
     Records system data during a simulation through callbacks.
 
     Use Recorder to record arbitrary system data during a simulation and
-    plot it afterwards. Recorder will also record a full time and state 
-    history in it `x` and `t` data members. 
+    plot it afterwards. Recorder will also record a full time and state
+    history in it `x` and `t` data members.
 
     During simulation, call `log` to record a data point, optionally including
     any events which have occurred.
 
     After simulation, call either 'time_response' or 'phase_portrait' to
     plot. The former will plot all recorded quantities against time. The
-    latter should be called with two labels, which tell it which two 
+    latter should be called with two labels, which tell it which two
     variables to plot against each other.
 
     Calling 'clear' will preserve labels and callbacks, but delete all data
-    specific to a given simulation run. 
+    specific to a given simulation run.
     """
     def __init__(self, system, labels={}):
         """
-        Create a Recorder from a dict mapping variable labels to 
+        Create a Recorder from a dict mapping variable labels to
         callback functions. The callback functions should be callable
-        with no argments and return a scalar numeric. 
+        with no argments and return a scalar numeric.
 
         Usage: record = Recorder(system)
                record = Recorder(system, {label_string: labeled_function,})
         """
-        self.system = system 
-        self.labels = labels 
+        self.system = system
+        self.labels = labels
         self.events = {}
         self.lines = {label: [] for label in labels.keys()}
         self.x = []
@@ -664,9 +670,9 @@ class Recorder(object):
 
     def log(self, events=[]):
         """
-        Call to record system variables and callback values at the 
-        current state and time. If events are specified, then they are 
-        stored associatively with the current state and time. 
+        Call to record system variables and callback values at the
+        current state and time. If events are specified, then they are
+        stored associatively with the current state and time.
 
         Usage: record.log()
                record.log(events_list)
@@ -680,9 +686,9 @@ class Recorder(object):
 
     def clear(self):
         """
-        Call with no arguments to erase all saved records of a simulation. 
+        Call with no arguments to erase all saved records of a simulation.
         The callback functions and the labels themselves remain, but time,
-        state, events, and labeled data is deleted. 
+        state, events, and labeled data is deleted.
 
         Usage: record.clear()
         """
@@ -694,10 +700,10 @@ class Recorder(object):
 
     def time_response(self, labels=set()):
         """
-        Plots all saved callack results against time. String labels are given 
+        Plots all saved callack results against time. String labels are given
         in the legend. Each line will be a different color. Events are shown as
         vertical lines at the time each event or list of events occurred. Later
-        I may add some facility for labeling events. I also plan to allow the 
+        I may add some facility for labeling events. I also plan to allow the
         plotting of arbitrary state variables.
 
         Usage: record.time_response()
@@ -716,12 +722,12 @@ class Recorder(object):
         Plots the phase space trajectory of two system variables. This
         means that they are plotted against each other for the currently
         saved trajectory. The underlying vector field is NOT plotted, as
-        that would involve computing derivatives (which are not saved). 
+        that would involve computing derivatives (which are not saved).
         Furthermore, the vector field could only be evaluated as a function
         for a second-order autonomous system.
 
         Events are plotted as little red circles around each event point. As
-        in `time_response`, there is no way yet to label these. 
+        in `time_response`, there is no way yet to label these.
 
         Later I may add the ability to plot arbitrary state variables against
         each other. In this case I may add the underlying vector field.
@@ -729,7 +735,7 @@ class Recorder(object):
         Usage: record.phase_portrait(x_label_string, y_label_string)
         """
         plt.figure()
-        plt.plot(numpy.array(self.lines[xlabel]), 
+        plt.plot(numpy.array(self.lines[xlabel]),
                  numpy.array(self.lines[ylabel]))
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
@@ -739,8 +745,8 @@ class Recorder(object):
 
 
 def check_NaN(system):
-    """ 
-    Check to make sure system states are still numbers. 
+    """
+    Check to make sure system states are still numbers.
     Raises an ArithmeticError otherwise.
 
     Usage: check_NaN(system)
@@ -749,4 +755,3 @@ def check_NaN(system):
         raise ArithmeticError("System state is NaN!")
 
 #################
-

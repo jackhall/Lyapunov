@@ -36,7 +36,7 @@ class SatelliteDemo(object):
 		"""event function"""
 		x, v = self.state.x
 		return v + 0.5*x
-	
+
 	def u_margin(self):
 		"""event function: negative when control limits exceeded"""
 		return 1.0 - abs(self.u_effective())
@@ -69,13 +69,13 @@ def run_satellite_demo_noevents():
     t_in = numpy.linspace(0.0, 3.0, 31)
     record = lyapunov.Recorder(system)
     stepper = lyapunov.runge_kutta4(system, t_in)
-    print "\nNo Events, No Sliding - satellite control"
-    print "initial state", system.state
+    print("\nNo Events, No Sliding - satellite control")
+    print("initial state", system.state)
     start = time.clock()
     #record = sol.simulate(t_in)
     for t, events in stepper:
         record.log()
-    print "time elapsed", time.clock() - start
+    print("time elapsed", time.clock() - start)
     plot_satellite(record)
 
 
@@ -87,7 +87,7 @@ def run_satellite_demo_events():
     t_in = numpy.linspace(0.0, 3.0, 31)
     record = lyapunov.Recorder(system)
     stepper = lyapunov.runge_kutta4(system, t_in)
-    print "\nWith Events and Sliding - satellite control"
+    print("\nWith Events and Sliding - satellite control")
     start = time.clock()
     for t, events in stepper:
         record.log(events)
@@ -99,6 +99,5 @@ def run_satellite_demo_events():
                 stepper.step_through()
                 system.u = (lambda: 1) if system.u_effective() > 1 else (lambda: -1)
                 system.events = [system.s]
-    print "time elapsed ", time.clock() - start
+    print("time elapsed ", time.clock() - start)
     plot_satellite(record)
-
