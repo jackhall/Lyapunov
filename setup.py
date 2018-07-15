@@ -14,7 +14,7 @@ solvers = Extension("lyapunov.solvers",
 
 
 setup(name="lyapunov",
-      version="3.1.1",
+      version="3.1.2",
       description="a library for integrating hybrid ODEs",
       author="Jack Hall",
       author_email="jackwhall7@gmail.com",
