@@ -1,4 +1,2 @@
-from lyapunov import *
-from solvers import *
-import demo
-
+from .lyapunov import *
+from .solvers import *
