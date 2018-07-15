@@ -668,7 +668,7 @@ class Recorder(object):
             self.events[len(self.t)] = events
         self.t.append(self.system.state[0])
         self.x.append(self.system.state[1])
-        for label, f in self.labels.iteritems():
+        for label, f in self.labels.items():
             self.lines[label].append(f())
 
     def clear(self):
@@ -696,7 +696,7 @@ class Recorder(object):
         Usage: record.time_response()
         """
         plt.figure()
-        for label, data in self.lines.iteritems():
+        for label, data in self.lines.items():
             plt.plot(self.t, numpy.array(data), label=label)
         for i in self.events.keys():
             plt.axvline(self.t[i], color='r')
