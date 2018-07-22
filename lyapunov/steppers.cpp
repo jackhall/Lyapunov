@@ -14,13 +14,25 @@
 
 	You should have received a copy of the GNU General Public License
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
-	
+
 	The author may be reached at jackhall@utexas.edu.
 */
 
 #include <boost/numeric/odeint.hpp>
 
 namespace lyapunov {
+    namespace bp = boost::python;
+
+    class Stepper : public ODEIterator {
+    /* Abstract base class for any ODE solver object.
+     */
+    public:
+        Stepper() = delete;
+        Stepper(bp::object sys) = 0;
+
+        virtual bool step(double step_size) = 0;
+    };
+
 
     template<typename system_type, typename stepper_type>
     class multistep_iterator {
@@ -37,17 +49,17 @@ namespace lyapunov {
 		std::function<void(const state_type&, state_type&, double)> eval_system;
 
     public:
-        multistep_iterator(system_type system) 
+        multistep_iterator(system_type system)
             : stepper(), current(system.get()), system(system),
-              eval_system([this](const state_type& x, state_type& dxdt, const double t) { 
+              eval_system([this](const state_type& x, state_type& dxdt, const double t) {
                   system.set(t, x);
-                  dxdt = system.dxdt(); 
+                  dxdt = system.dxdt();
               }) {}
 
-        void synchronize() { 
+        void synchronize() {
             /* Moves the managed system to the current state.
              */
-            system.set(current.first, current.second); 
+            system.set(current.first, current.second);
         }
         pair_type state() const { return current; }
         bool step(double step_size) {
@@ -62,11 +74,11 @@ namespace lyapunov {
         }
     };
     template<typename system_type, typename stepper_type>
-    class fixed_step_iterator 
+    class fixed_step_iterator
       : public multistep_iterator<system_type, stepper_type> {
         /* An iterator to control the flow of a basic simulation. It simulates
          * systems defined as objects, such that state is set separately from
-         * from derivative evaluation. Allowing the user to split up that 
+         * from derivative evaluation. Allowing the user to split up that
          * computation means that setting the state is potentially expensive,
          * so it shouldn't be done more often than necessary.
          */
@@ -76,7 +88,7 @@ namespace lyapunov {
         pair_type saved;
 
     public:
-        fixed_step_iterator(system_type system) 
+        fixed_step_iterator(system_type system)
             : base_type(system), saved(current) {}
 
         bool step(double step_size) {
@@ -85,7 +97,7 @@ namespace lyapunov {
              * returning control to the user.
              */
             swap();  // current state saved; do_step overwrites previous saved state
-            stepper.do_step(eval_system, saved.second, saved.first, 
+            stepper.do_step(eval_system, saved.second, saved.first,
                             current.second, step_size);
             current.first = saved.first + step_size;
             return true;
@@ -96,15 +108,15 @@ namespace lyapunov {
             saved = current;
             synchronize();
         }
-        void swap() { 
+        void swap() {
             /* Does not synchronize, because swap is most commonly called just before
              * stepper.do_step, which also synchronizes.
              */
-            std::swap(current, saved); 
+            std::swap(current, saved);
         }
     };
     template<typename system_type, typename stepper_type>
-    class free_step_iterator 
+    class free_step_iterator
       : public fixed_step_iterator<system_type, stepper_type> {
         /*
          */
@@ -129,4 +141,3 @@ namespace lyapunov {
     };
 
 }
-

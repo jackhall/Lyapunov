@@ -1,24 +1,13 @@
-/*
-	Lyapunov: a library for integrating nonlinear dynamical systems
-	Copyright (C) 2013  John Wendell Hall
+#ifndef ROOTFINDERS_CPP
+#define ROOTFINDERS_CPP
 
-	This program is free software: you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
+#include "common.cpp"
+#include "steppers.cpp"
 
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program.  If not, see <http://www.gnu.org/licenses/>.
-	
-	The author may be reached at jackhall@utexas.edu.
-*/
 
 namespace lyapunov {
+    namespace bp = boost::python;
+
     struct Interval {
         /* A utility to handle the contracting interval of a bisection rootfinder.
          */
@@ -26,5 +15,42 @@ namespace lyapunov {
         double length() const { return upper - lower; }
         double midpoint() const { return (upper + lower) / 2.0; }
     };
+
+    class RootFinder : public ODEIterator {
+    /* Abstract base class for any rootfinders.
+     */
+    protected:
+        Stepper _stepper;
+
+        virtual void _step_across(bp::object new_state) = 0;
+
+    public:
+        RootFinder() = delete;
+        RootFinder(Stepper stepper, bp::object events);
+        RootFinder(bp::object stepper, bp::object events) {
+            // Wrap python stepper with a subclass of Stepper.
+        }
+
+        // RootFinders do not directly manage a system.
+        // All system accesses go through Steppers.
+        bp::object get_system() const {
+            return stepper.get_system();
+        }
+        void set_system(bp::object new_system) {
+            stepper.set_system(new_system);
+        }
+
+        double get_step_size() const {
+            return stepper.get_step_size();
+        }
+
+        void step_across(bp::object new_state = bp::object()) {
+            _step_across(new_state);
+        }
+
+        virtual bp::tuple next() = 0;
+    };
+
 }
 
+#endif
