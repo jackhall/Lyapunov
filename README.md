@@ -22,6 +22,10 @@ In the base directory, run `python setup.py install`.
 On Windows, use `setup.py install` from the command prompt.
 For other options, see the [standard Python docs](http://docs.python.org/2/install/index.html#install-index) on module installation.
 
+Many systems have parallel installations of python. 
+This can make it tricky to link the compiled solvers to the proper version of the boost libraries. 
+If you have any problems getting that to work, please email me or create a github issue and I'll help you out. 
+Knowing more about the environments in which people try to install Lyapunov will also help me refine the build process. 
 
 **Uninstallation**
 
