@@ -2,7 +2,7 @@ Lyapunov
 ========
 
 A library for numerically integrating nonlinear dynamical systems.
-The library is released under the GNU General Public License version 3.
+The library is released under the BSD 3-Clause license.
 Documentation is in the code and online at https://github.com/jackhall/Lyapunov/wiki.
 
 version 3.1.2, 7/15/2018
